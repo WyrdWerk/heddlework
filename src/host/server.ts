@@ -80,7 +80,7 @@ export function createWorkspaceHost(options: WorkspaceHostOptions): WorkspaceHos
         return upgraded ? undefined : secureResponse('WebSocket upgrade failed', 426)
       }
       if (url.pathname === '/health') return new Response(JSON.stringify({ ok: true, protocol: PROTOCOL_VERSION }), { headers: { ...SECURITY_HEADERS, 'content-type': 'application/json' } })
-      if (staticRoot && request.method === 'GET') return serveStatic(staticRoot, request)
+      if (staticRoot && (request.method === 'GET' || request.method === 'HEAD')) return serveStatic(staticRoot, request)
       return secureResponse('Heddlework workspace host', 404)
     },
     websocket: {
