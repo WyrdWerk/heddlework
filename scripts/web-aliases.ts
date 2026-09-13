@@ -5,7 +5,7 @@ import type { BunPlugin } from 'bun'
 export function webAliasPlugin(root: string): BunPlugin {
   const dom = (file: string) => resolve(root, 'src/dom', file)
   const gpuix = realpathSync(resolve(root, 'node_modules/@gpuix/react'))
-  const exact: Record<string, string> = { '@gpuix/react': dom('host.tsx'), '@gpuix/react/jsx-runtime': dom('host.tsx'), '@gpuix/react/jsx-dev-runtime': dom('host.tsx'), 'node:path': dom('shims/node-path.ts'), path: dom('shims/node-path.ts') }
+  const exact: Record<string, string> = { '@gpuix/react': dom('host.tsx'), '@gpuix/react/jsx-runtime': dom('host.tsx'), '@gpuix/react/jsx-dev-runtime': dom('host.tsx'), 'node:path': dom('shims/node-path.ts'), path: dom('shims/node-path.ts'), 'node:fs': dom('shims/node-fs.ts'), 'node:fs/promises': dom('shims/node-fs-promises.ts') }
   const files: Record<string, string> = {
     'src/ui/clipboard-media.ts': dom('shims/clipboard-media.ts'),
     'src/ui/open-external.ts': dom('shims/open-external.ts'),
@@ -13,7 +13,7 @@ export function webAliasPlugin(root: string): BunPlugin {
   }
   const replacements = new Map(Object.entries(files).map(([file, target]) => [resolve(root, file), target]))
   return { name: 'heddlework-web-aliases', setup(build) {
-    build.onResolve({ filter: /^(@gpuix\/react(\/jsx(-dev)?-runtime)?|node:path|path)$/u }, (args) => ({ path: exact[args.path]! }))
+    build.onResolve({ filter: /^(@gpuix\/react(\/jsx(-dev)?-runtime)?|node:path|node:fs|node:fs\/promises|path)$/u }, (args) => ({ path: exact[args.path]! }))
     build.onResolve({ filter: /^@gpuix\/react\/(select|combobox|tooltip)$/u }, (args) => ({ path: resolve(root, 'node_modules/@gpuix/react/dist/components', `${args.path.slice('@gpuix/react/'.length)}.js`) }))
     build.onResolve({ filter: /use-gpuix\.js$/u }, (args) => {
       const resolved = resolve(args.importer, '..', args.path)
