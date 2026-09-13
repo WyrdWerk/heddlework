@@ -41,7 +41,7 @@ export function SettingsView({
         <Button label="Done" compact onClick={onClose} />
       </MotionDiv>
       <div testId="settings-scroll" style={{ height: 0, flexGrow: 1, minHeight: 0, overflow: 'scroll', display: 'flex', flexDirection: 'row', justifyContent: 'center', paddingTop: mobile ? 18 : 28, paddingBottom: 52, paddingLeft: mobile ? contentGutter : 28, paddingRight: mobile ? contentGutter : 28 }}>
-        <div testId="settings-global" style={{ width: '100%', maxWidth: 720, minHeight: mobile ? 0 : 620, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: mobile ? 20 : 24 }}>
+        <div testId="settings-global" style={{ width: '100%', maxWidth: 720, alignSelf: 'flex-start', minHeight: mobile ? 0 : 620, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: mobile ? 20 : 24 }}>
           <SettingsSection title="Runtime" description="Global Pi connection settings for this application.">
             <SettingsRow icon="terminal" label="Pi executable" value={resolvePiExecutable()} />
             <SettingsRow icon="circle" label="Status" value={state.connectionMessage} tone={state.connection === 'connected' ? 'success' : 'normal'} />
