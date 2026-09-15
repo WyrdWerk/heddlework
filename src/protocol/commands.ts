@@ -25,6 +25,7 @@ export type WorkbenchCommand =
   | { type: 'removeQueuedFlow'; runId: string }
   | { type: 'queueFabricPeerGate' | 'cancelBlockingQueueActivity' | 'resumeQueue' | 'drainQueueMessages' | 'pause' | 'abort' | 'newSession' | 'refreshSessions' | 'loadMoreSessions' | 'loadEarlierMessages' | 'cloneSession' | 'exportSession' | 'compact' | 'refreshWorkspaceDiff' | 'clearNotices' }
   | { type: 'switchSession'; path: string }
+  | { type: 'switchWorkspace'; path: string }
   | { type: 'openSessionTree'; preserveQueue?: boolean }
   | { type: 'navigateTree'; entryId: string; options?: NavigateTreeOptions }
   | { type: 'forkFrom'; entryId: string; preserveQueue?: boolean }
@@ -49,7 +50,7 @@ export type WorkbenchCommandType = WorkbenchCommand['type']
 export const WORKBENCH_COMMAND_TYPES = [
   'submit', 'queueInput', 'updateQueuedInput', 'removeQueuedInput', 'moveQueuedInput', 'moveQueuedInputToLane',
   'toggleQueuedInputPause', 'steerQueuedInput', 'removeQueuedFlow', 'queueFabricPeerGate', 'cancelBlockingQueueActivity',
-  'resumeQueue', 'drainQueueMessages', 'pause', 'abort', 'newSession', 'switchSession', 'refreshSessions',
+  'resumeQueue', 'drainQueueMessages', 'pause', 'abort', 'newSession', 'switchSession', 'switchWorkspace', 'refreshSessions',
   'loadMoreSessions', 'loadEarlierMessages', 'openSessionTree', 'navigateTree', 'cloneSession', 'forkFrom', 'exportSession',
   'setModel', 'setThinkingLevel', 'compact', 'completeUiRequest', 'respondToDialog', 'submitAskUserQuestionnaire',
   'cancelAskUserQuestionnaire', 'setAskUserQuestionnaireCollapsed', 'settleThread', 'snoozeThread', 'wakeThread',
@@ -73,7 +74,7 @@ export function isWorkbenchCommand(value: unknown): value is WorkbenchCommand {
     case 'moveQueuedInput': return id('id') && integer(value.targetIndex, 0, 100_000)
     case 'moveQueuedInputToLane': return id('id') && LANES.has(value.lane as QueueLane)
     case 'removeQueuedFlow': return id('runId')
-    case 'switchSession': case 'settleThread': case 'wakeThread': return path()
+    case 'switchSession': case 'switchWorkspace': case 'settleThread': case 'wakeThread': return path()
     case 'openSessionTree': return optionalBoolean(value.preserveQueue)
     case 'navigateTree': return id('entryId') && validNavigateOptions(value.options)
     case 'forkFrom': return id('entryId') && optionalBoolean(value.preserveQueue)
@@ -121,6 +122,8 @@ export async function applyWorkbenchCommand(controller: WorkbenchController, com
     case 'pause': return controller.pause()
     case 'abort': return controller.abort()
     case 'newSession': return controller.newSession()
+    // Workspace targets are authorized by the host (filesystem check) before dispatch; failures surface as controller notices.
+    case 'switchWorkspace': return controller.switchWorkspace(command.path)
     case 'switchSession': { requireKnownPath(command.path); const session = controller.getSnapshot().sessions.find((entry) => entry.path === command.path); if (!session) throw new Error('Session is not available'); return controller.switchSession(session) }
     case 'refreshSessions': return controller.refreshSessions()
     case 'loadMoreSessions': return controller.loadMoreSessions()

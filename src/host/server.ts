@@ -7,6 +7,7 @@ import type { TerminalSessionService } from '../terminal/service.ts'
 import type { RemoteTerminalFrame, RemoteTerminalSnapshot } from '../protocol/terminal.ts'
 import { CommandReplayCache } from './command-replay.ts'
 import { timingSafeEqualToken } from './token.ts'
+import type { HostIdentity } from '../protocol/host-identity.ts'
 
 export interface WorkspaceHostOptions {
   controller: WorkbenchController
@@ -19,6 +20,7 @@ export interface WorkspaceHostOptions {
   allowNetwork?: boolean
   allowedOrigins?: readonly string[]
   terminals?: TerminalSessionService
+  identity?: HostIdentity
 }
 export interface WorkspaceHost {
   readonly url: string; readonly port: number; readonly hostname: string; readonly token: string; readonly workspacePath: string
@@ -48,7 +50,7 @@ export const MAX_SERVER_QUEUED_BYTES = 8 * 1024 * 1024
 export const SERVER_MESSAGE_LIFETIME_MS = 30_000
 const SEND_RETRY_MS = 25
 const SECURITY_HEADERS = {
-  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
   'referrer-policy': 'no-referrer',
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
@@ -104,7 +106,7 @@ export function createWorkspaceHost(options: WorkspaceHostOptions): WorkspaceHos
           socket.data.clientId = message.clientId
           const snapshot = socketSnapshot(socket, options.controller)
           socket.data.lastSnapshot = snapshot
-          send(socket, { kind: 'welcome', protocol: PROTOCOL_VERSION, workspacePath: options.workspacePath, snapshot, flows: options.flows.getSnapshot(), ...(options.terminals ? { terminal: serializeRemoteTerminal(options.terminals) } : {}) })
+          send(socket, { kind: 'welcome', protocol: PROTOCOL_VERSION, workspacePath: snapshot.workspacePath, snapshot, flows: options.flows.getSnapshot(), ...(options.terminals ? { terminal: serializeRemoteTerminal(options.terminals) } : {}), ...(options.identity ? { host: options.identity } : {}) })
           if (options.terminals) for (const session of options.terminals.getStateSnapshot().sessions) { const frame = serializeRemoteTerminalFrame(options.terminals, session.id); if (frame) send(socket, { kind: 'terminalFrame', frame }) }
           return
         }
@@ -116,6 +118,7 @@ export function createWorkspaceHost(options: WorkspaceHostOptions): WorkspaceHos
           if (closed || !sockets.has(socket)) throw new Error('Workspace host is closing')
           const result = await replay.execute(clientId, message.id, message.command, async () => {
             if (message.command.type === 'loadEarlierMessages') { await revealEarlierMessages(socket, options.controller); pushSocketSnapshot(socket, options.controller); return }
+            if (message.command.type === 'switchWorkspace') { assertWorkspaceDirectory(message.command.path); return options.controller.switchWorkspace(realpathSync(resolve(message.command.path))) }
             return applyWorkbenchCommand(options.controller, message.command, options.terminals ? { terminals: options.terminals } : {})
           })
           if (!closed && sockets.has(socket)) send(socket, result)
@@ -193,6 +196,9 @@ function validOrigin(request: Request, hostname: string, allowed: Set<string>): 
 }
 function normalizeOrigin(value: string): string { try { const url = new URL(value); return url.origin } catch { throw new Error(`Invalid allowed origin: ${value}`) } }
 export function isLoopbackHost(hostname: string): boolean { const clean = hostname.replace(/^\[|\]$/g, '').toLowerCase(); return clean === 'localhost' || clean === '::1' || /^127(?:\.\d{1,3}){3}$/.test(clean) }
+
+// Remote switchWorkspace targets must exist on this machine before the controller tries to open them.
+function assertWorkspaceDirectory(path: string): void { const target = resolve(path); if (!existsSync(target) || !statSync(target).isDirectory()) throw new Error('Workspace path must be an existing directory') }
 interface OutboundMessage {
   frames: string[]
   frameBytes: number[]

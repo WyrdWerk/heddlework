@@ -4,7 +4,7 @@ import { serializeSnapshot, SNAPSHOT_IMAGE_LIMIT_BYTES } from '../src/protocol/s
 import { createInitialState } from '../src/workbench/state.ts'
 import type { WorkbenchController } from '../src/workbench/controller.ts'
 describe('remote command validation', () => {
-  it('rejects malformed payloads instead of checking only the type', () => { expect(isWorkbenchCommand({ type: 'submit' })).toBe(false); expect(isWorkbenchCommand({ type: 'moveQueuedInput', id: 'a', targetIndex: -1 })).toBe(false); expect(isWorkbenchCommand({ type: 'writeTerminal', id: 't', data: 'x'.repeat(8_193) })).toBe(false); expect(isWorkbenchCommand({ type: 'switchWorkspace', path: '/tmp' })).toBe(false); expect(isWorkbenchCommand({ type: 'submit', text: 'safe' })).toBe(true) })
+  it('rejects malformed payloads instead of checking only the type', () => { expect(isWorkbenchCommand({ type: 'submit' })).toBe(false); expect(isWorkbenchCommand({ type: 'moveQueuedInput', id: 'a', targetIndex: -1 })).toBe(false); expect(isWorkbenchCommand({ type: 'writeTerminal', id: 't', data: 'x'.repeat(8_193) })).toBe(false); expect(isWorkbenchCommand({ type: 'switchWorkspace', path: '/tmp' })).toBe(true); expect(isWorkbenchCommand({ type: 'submit', text: 'safe' })).toBe(true) })
   it('validates image size and embedded preview metadata against the actual base64 payload', () => {
     const data = 'aGVsbG8='
     const image = { id: 'image-1', type: 'image', data, mimeType: 'image/png', previewPath: `data:image/png;base64,${data}`, fileName: 'hello.png', size: 5 }

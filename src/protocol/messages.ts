@@ -2,6 +2,7 @@ import type { FlowRuntimeSnapshot } from '../flows/types.ts'
 import { isWorkbenchCommand, type WorkbenchCommand } from './commands.ts'
 import type { SnapshotPatch, WorkbenchSnapshot } from './snapshot.ts'
 import type { RemoteTerminalFrame, RemoteTerminalSnapshot } from './terminal.ts'
+import type { HostIdentity } from './host-identity.ts'
 
 export type ClientMessage =
   | { kind: 'hello'; protocol: number; clientId: string }
@@ -9,7 +10,7 @@ export type ClientMessage =
   | { kind: 'ping' }
 
 export type ServerMessage =
-  | { kind: 'welcome'; protocol: number; workspacePath: string; snapshot: WorkbenchSnapshot; flows: FlowRuntimeSnapshot; terminal?: RemoteTerminalSnapshot }
+  | { kind: 'welcome'; protocol: number; workspacePath: string; snapshot: WorkbenchSnapshot; flows: FlowRuntimeSnapshot; terminal?: RemoteTerminalSnapshot; hostUrls?: string[]; host?: HostIdentity }
   | { kind: 'patch'; patch: SnapshotPatch }
   | { kind: 'flows'; snapshot: FlowRuntimeSnapshot }
   | { kind: 'terminal'; snapshot: RemoteTerminalSnapshot }
