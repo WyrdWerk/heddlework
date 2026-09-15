@@ -351,7 +351,10 @@ function serveStatic(root: string, request: Request): Response {
   let realTarget: string
   try { realTarget = realpathSync(target) } catch { return secureResponse('Not found', 404) }
   if (realTarget !== root && !realTarget.startsWith(root + sep)) return secureResponse('Forbidden', 403)
-  const headers: Record<string, string> = { ...SECURITY_HEADERS, 'cache-control': target.endsWith('index.html') ? 'no-cache' : 'public, max-age=3600', 'content-type': contentType(target) }
+  // No asset is content-hashed (fixed names like main.js), so any max-age here strands
+  // browsers on a stale bundle until the entry expires — and caches sw.js itself,
+  // hiding build-hash updates from the service worker. Always revalidate.
+  const headers: Record<string, string> = { ...SECURITY_HEADERS, 'cache-control': 'no-cache', 'content-type': contentType(target) }
   return new Response(Bun.file(realTarget), { headers })
 }
 function isSpaNavigation(request: Request, relativePath: string): boolean {
