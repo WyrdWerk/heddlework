@@ -1,21 +1,5 @@
+import './uuid-shim.ts'
 import '../dom/process-shim.ts'
-
-// crypto.randomUUID (and crypto.subtle) exist only in secure contexts
-// (HTTPS or localhost). The pairing docs explicitly support plain-HTTP LAN
-// access (docs/community-web-port.md), but src/protocol/frames.ts calls
-// crypto.randomUUID() for every frame, so on insecure origins the client
-// crashes with a black screen before it can render anything. Shim a UUIDv4
-// on top of getRandomValues, which IS available in insecure contexts.
-if (typeof crypto.randomUUID !== 'function') {
-  const randomUUID = (): `${string}-${string}-${string}-${string}-${string}` => {
-    const b = crypto.getRandomValues(new Uint8Array(16))
-    b[6] = ((b[6] ?? 0) & 0x0f) | 0x40
-    b[8] = ((b[8] ?? 0) & 0x3f) | 0x80
-    const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
-    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`
-  }
-  Object.defineProperty(crypto, 'randomUUID', { value: randomUUID })
-}
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { installCreateElementBridge } from '../dom/host.tsx'
