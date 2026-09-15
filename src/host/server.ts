@@ -1,4 +1,5 @@
 import { existsSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import type { FlowRuntime } from '../flows/runtime.ts'
 import { applyWorkbenchCommand, diffSnapshots, encodeFrames, FrameAssembler, isPatchEmpty, parseClientMessage, PROTOCOL_VERSION, serializeSnapshot, utf8ByteLength, MAX_WS_FRAME_BYTES, type ServerMessage, type WorkbenchSnapshot } from '../protocol/index.ts'
@@ -118,7 +119,7 @@ export function createWorkspaceHost(options: WorkspaceHostOptions): WorkspaceHos
           if (closed || !sockets.has(socket)) throw new Error('Workspace host is closing')
           const result = await replay.execute(clientId, message.id, message.command, async () => {
             if (message.command.type === 'loadEarlierMessages') { await revealEarlierMessages(socket, options.controller); pushSocketSnapshot(socket, options.controller); return }
-            if (message.command.type === 'switchWorkspace') { assertWorkspaceDirectory(message.command.path); return options.controller.switchWorkspace(realpathSync(resolve(message.command.path))) }
+            if (message.command.type === 'switchWorkspace') { const target = expandWorkspacePath(message.command.path); assertWorkspaceDirectory(target); return options.controller.switchWorkspace(realpathSync(resolve(target))) }
             return applyWorkbenchCommand(options.controller, message.command, options.terminals ? { terminals: options.terminals } : {})
           })
           if (!closed && sockets.has(socket)) send(socket, result)
@@ -199,6 +200,14 @@ export function isLoopbackHost(hostname: string): boolean { const clean = hostna
 
 // Remote switchWorkspace targets must exist on this machine before the controller tries to open them.
 function assertWorkspaceDirectory(path: string): void { const target = resolve(path); if (!existsSync(target) || !statSync(target).isDirectory()) throw new Error('Workspace path must be an existing directory') }
+
+// The browser types paths against the host's home: '~/projects/x' is the natural spelling.
+export function expandWorkspacePath(path: string, home = homedir()): string {
+  const trimmed = path.trim()
+  if (trimmed === '~') return home
+  if (trimmed.startsWith('~/')) return join(home, trimmed.slice(2))
+  return trimmed
+}
 interface OutboundMessage {
   frames: string[]
   frameBytes: number[]
