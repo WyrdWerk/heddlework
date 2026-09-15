@@ -65,10 +65,10 @@ export function CommandPalette({ commands, activeIndex, onChoose }: { commands: 
           const index = window.windowStart + visibleIndex
           return (
             <div key={`${command.source}-${command.name}`} testId={`command-option-${command.name}`} style={{ height: rowHeight, flexShrink: 0, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 9, paddingRight: 9, borderRadius: 7, backgroundColor: index === activeIndex ? colors.raised : colors.transparent, cursor: 'pointer', hover: { backgroundColor: colors.hover } }} onMouseDown={() => onChoose(command)} onClick={() => onChoose(command)}>
-              <text style={{ color: index === activeIndex ? colors.text : colors.textMuted, fontSize: 11, fontWeight: 650, fontFamily: nativeTheme.fontMono }}>{`/${command.name}`}</text>
-              {command.argumentHint && <text style={{ color: colors.textMuted, fontSize: 9, fontFamily: nativeTheme.fontMono, whiteSpace: 'nowrap' }}>{command.argumentHint}</text>}
+              <text style={{ flexShrink: 0, whiteSpace: 'nowrap', color: index === activeIndex ? colors.text : colors.textMuted, fontSize: 11, fontWeight: 650, fontFamily: nativeTheme.fontMono }}>{`/${command.name}`}</text>
+              {command.argumentHint && <text style={{ flexShrink: 0, color: colors.textMuted, fontSize: 9, fontFamily: nativeTheme.fontMono, whiteSpace: 'nowrap' }}>{command.argumentHint}</text>}
               {command.description && <text style={{ minWidth: 0, flexGrow: 1, color: colors.textFaint, fontSize: 10, whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{command.description}</text>}
-              <text style={{ color: colors.textFaint, fontSize: 8 }}>{command.source.toUpperCase()}</text>
+              <text style={{ flexShrink: 0, whiteSpace: 'nowrap', color: colors.textFaint, fontSize: 8 }}>{command.source.toUpperCase()}</text>
             </div>
           )
         })}
