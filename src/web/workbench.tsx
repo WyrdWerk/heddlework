@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useSyncExternalStore } from 'react'
+import { basename } from 'node:path'
 import { WorkbenchKernel } from '../core/kernel.ts'
 import { RemoteWorkbenchController, asWorkbenchController } from '../dom/remote-controller.ts'
 import { domRenderer, GpuixContext } from '../dom/host.tsx'
@@ -9,6 +10,8 @@ import { colors } from '../ui/theme.ts'
 import { defaultThemeManager } from '../ui/theme-manager.ts'
 import { coreToolPresentersPlugin, toolPresenterSlot } from '../ui/tool-presenters.ts'
 import { workspaceClient } from './store.ts'
+import { WebHostSwitcher } from './host-switcher.ts'
+import { shortHostName } from '../protocol/host-identity.ts'
 import { RemoteTerminalService, asTerminalSessionService } from '../client/remote-terminal-service.ts'
 
 const kernel = new WorkbenchKernel()
@@ -21,6 +24,7 @@ export function WebWorkbench() {
   const remote = useMemo(() => new RemoteWorkbenchController(client), [client])
   const controller = useMemo(() => asWorkbenchController(remote), [remote])
   const remoteTerminals = useMemo(() => new RemoteTerminalService(client), [client])
+  const switcher = useMemo(() => new WebHostSwitcher(client, localStorage), [client])
   const terminals = useMemo(() => asTerminalSessionService(remoteTerminals), [remoteTerminals])
   const registry = useMemo(() => { const value = new WorkbenchUiRegistry(); value.register(createCoreUiExtension(controller)); return value }, [controller])
   useEffect(() => { defaultThemeManager.start(); return () => { void remote.dispose(); void remoteTerminals.dispose(); registry.dispose() } }, [registry, remote, remoteTerminals])
@@ -28,8 +32,14 @@ export function WebWorkbench() {
     document.documentElement.style.colorScheme = defaultThemeManager.getSnapshot().resolved
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', colors.background)
   }, [view.state])
+  useEffect(() => {
+    if (view.status === 'connecting') { document.title = 'Connecting… · Heddlework'; return }
+    if (view.status !== 'open') { document.title = 'Offline · Heddlework'; return }
+    const workspace = basename(view.workspacePath) || view.workspacePath
+    document.title = view.host ? [shortHostName(view.host), workspace, 'Heddlework'].join(' · ') : [workspace, 'Heddlework'].join(' · ')
+  }, [view.status, view.host, view.workspacePath])
   if (view.status !== 'open' || !view.state) return <ConnectionStatus status={view.status} error={view.lastError} />
-  return <GpuixContext.Provider value={{ renderer: domRenderer }}><WorkbenchApp controller={controller} presenters={presenters} ui={registry} themeManager={defaultThemeManager} terminals={terminals} onQuit={() => client.disconnect()} /></GpuixContext.Provider>
+  return <GpuixContext.Provider value={{ renderer: domRenderer }}><WorkbenchApp controller={controller} presenters={presenters} ui={registry} themeManager={defaultThemeManager} terminals={terminals} hostSwitcher={switcher} onQuit={() => client.disconnect()} /></GpuixContext.Provider>
 }
 
 function ConnectionStatus({ status, error }: { status: string; error?: string | undefined }) {
