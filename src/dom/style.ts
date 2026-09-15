@@ -49,6 +49,22 @@ function overflow(value: unknown): string | undefined {
   return undefined
 }
 
+// GPUIX resolves face names natively and ships macOS faces (the theme's mono
+// token is Menlo); browsers only see installed system fonts, so bare face
+// names get the same fallback chains rich.tsx uses for markdown. Without
+// this, non-macOS platforms render every shared-UI mono surface in the
+// browser default fixed font (Courier New on Windows).
+const SANS_FALLBACK = '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif'
+const MONO_FALLBACK = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace'
+function resolveFontFamily(family: unknown): string | undefined {
+  if (typeof family !== 'string') return undefined
+  if (family.includes(',')) return family
+  if (family === '.SystemUIFont') return SANS_FALLBACK
+  const quoted = /[\s"']/ .test(family) ? `"${family.replace(/"/g, '')}"` : family
+  if (family === 'Menlo') return `${quoted}, ${MONO_FALLBACK}`
+  return `${quoted}, ${SANS_FALLBACK}`
+}
+
 export function toCss(style: StyleDesc | undefined, hovered = false, active = false): CSSProperties {
   if (!style) return {}
   const merged: AnyStyle = { ...style }
@@ -63,6 +79,7 @@ export function toCss(style: StyleDesc | undefined, hovered = false, active = fa
       continue
     }
     switch (key) {
+      case 'fontFamily': css.fontFamily = resolveFontFamily(raw); break
       case 'background': css.background = background(raw as StyleDesc['background']); break
       case 'boxShadow': css.boxShadow = shadow(raw as StyleDesc['boxShadow']); break
       case 'overflow': css.overflow = overflow(raw); break
