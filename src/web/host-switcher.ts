@@ -28,6 +28,7 @@ export class WebHostSwitcher implements HostSwitcherSurface {
   #token = ''
   #savedId: string | undefined
   #lastStatus: WorkspaceClientStatus | undefined
+  #snapshot: HostSwitcherSnapshot | undefined
 
   constructor(
     client: WebHostClient,
@@ -50,22 +51,26 @@ export class WebHostSwitcher implements HostSwitcherSurface {
   }
 
   getSnapshot(): HostSwitcherSnapshot {
-    const view = this.#client.getSnapshot()
-    const savedId = this.#savedId ?? view.host?.id
-    return {
-      current: {
-        origin: 'remote',
-        identity: view.host ?? undefined,
-        url: view.url ?? (this.#url || this.#storage.getItem('heddlework.host') || ''),
-        status: view.status,
-        ...(view.lastError ? { lastError: view.lastError } : {}),
-        ...(savedId && this.#savedHosts.get(savedId) ? { savedId } : {}),
-      },
-      saved: this.#savedHosts.list(),
-      busy: this.#busy || view.status === 'connecting',
-      canUseLocal: false,
+    // useSyncExternalStore compares snapshots by identity: build once per emit, not per call.
+    if (!this.#snapshot) {
+      const view = this.#client.getSnapshot()
+      const savedId = this.#savedId ?? view.host?.id
+      this.#snapshot = {
+        current: {
+          origin: 'remote',
+          identity: view.host ?? undefined,
+          url: view.url ?? (this.#url || this.#storage.getItem('heddlework.host') || ''),
+          status: view.status,
+          ...(view.lastError ? { lastError: view.lastError } : {}),
+          ...(savedId && this.#savedHosts.get(savedId) ? { savedId } : {}),
+        },
+        saved: this.#savedHosts.list(),
+        busy: this.#busy || view.status === 'connecting',
+        canUseLocal: false,
+      }
     }
-  }
+    return this.#snapshot
+    }
 
   async connect(target: { link: string } | { savedId: string }): Promise<void> {
     if ('link' in target) {
@@ -129,6 +134,7 @@ export class WebHostSwitcher implements HostSwitcherSurface {
   }
 
   #emit(): void {
+    this.#snapshot = undefined
     for (const listener of this.#listeners) listener()
   }
 }
