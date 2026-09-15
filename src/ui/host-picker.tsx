@@ -28,7 +28,7 @@ function hostStatusText(status: HostSwitcherSnapshot['current']['status']): stri
 }
 
 export function HostSwitcherChip({ switcher, compact = false }: { switcher: HostSwitcherSurface; compact?: boolean }) {
-  const snapshot = useSyncExternalStore(switcher.subscribe, switcher.getSnapshot)
+  const snapshot = useSyncExternalStore(switcher.subscribe.bind(switcher), switcher.getSnapshot.bind(switcher))
   const dropdown = useDropdownState()
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
@@ -39,7 +39,7 @@ export function HostSwitcherChip({ switcher, compact = false }: { switcher: Host
 }
 
 export function HostPicker({ switcher, open, onClose }: { switcher: HostSwitcherSurface; open: boolean; onClose(): void }) {
-  const snapshot = useSyncExternalStore(switcher.subscribe, switcher.getSnapshot)
+  const snapshot = useSyncExternalStore(switcher.subscribe.bind(switcher), switcher.getSnapshot.bind(switcher))
   const windowSize = useWindowSize({ intervalMs: 100 })
   const escape = (event: { key?: string }) => { if (open && event.key === 'escape') onClose() }
   const run = async (action: Promise<void>, closeOnSuccess = true): Promise<void> => {
