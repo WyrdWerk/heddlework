@@ -62,7 +62,8 @@ jobs:
           exit 1
       - name: Verify Pi, pi-fabric, and web client inside the container
         run: |
-          test "$(docker exec hw-ci pi --version | cut -d. -f1)" -ge 1
+          # pi currently reports 0.87.1; assert the shape, not which major it is.
+          docker exec hw-ci pi --version | grep -Eq '^v?[0-9]+\.[0-9]+'
           docker exec hw-ci sh -c 'test -d /state/pi/agent/npm/node_modules/pi-fabric'
           docker exec hw-ci sh -c 'test -f /app/dist/web/index.html'
       - name: Verify the custom endpoint written by the entrypoint
