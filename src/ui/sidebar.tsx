@@ -80,10 +80,17 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
     const workspace = resolve(state.workspacePath)
     setProjectScope(projectOptions.some((option) => option.value === workspace) ? workspace : ALL_PROJECTS_SCOPE)
   }, [projectOptions, projectScope, state.workspacePath])
+  // Follow the host workspace only when it actually changes. Without the
+  // lastHostWorkspace guard this effect re-ran on every sessions refresh
+  // (projectScope is a dependency) and reverted any scope the user picked
+  // manually, making the project dropdown unusable as a filter.
+  const lastHostWorkspace = useRef(resolve(state.workspacePath))
   useEffect(() => {
-    if (projectScope === ALL_PROJECTS_SCOPE) return
     const workspace = resolve(state.workspacePath)
-    if (projectScope !== workspace && projectOptions.some((option) => option.value === workspace)) setProjectScope(workspace)
+    if (workspace === lastHostWorkspace.current) return
+    lastHostWorkspace.current = workspace
+    if (projectScope === ALL_PROJECTS_SCOPE) return
+    if (projectOptions.some((option) => option.value === workspace)) setProjectScope(workspace)
   }, [projectOptions, projectScope, state.workspacePath])
   const matchingSessions = useMemo(() => {
     const unique = new Map<string, PiSessionSummary>()
