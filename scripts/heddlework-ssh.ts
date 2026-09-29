@@ -246,23 +246,58 @@ class Tunnel {
   get stopped(): boolean { return this.#stopped }
 }
 
-async function supervise(tunnel: Tunnel, exited: Promise<number>): Promise<never> {
+async function supervise(tunnel: Tunnel, exited: Promise<number>, log: (message: string) => void): Promise<void> {
   let delay = 1_000
   for (;;) {
     const startedAt = Date.now()
     await exited
-    if (tunnel.stopped) process.exit(0)
+    if (tunnel.stopped) return
     if (Date.now() - startedAt > 60_000) delay = 1_000
-    console.error(`[heddlework-ssh] ${tunnel.exitReason ?? 'ssh tunnel exited'}; reconnecting in ${delay / 1000}s`)
+    log(`${tunnel.exitReason ?? 'ssh tunnel exited'}; reconnecting in ${delay / 1000}s`)
     await Bun.sleep(delay)
+    if (tunnel.stopped) return
     delay = Math.min(delay * 2, 30_000)
     exited = tunnel.start()
     try {
       await tunnel.ready()
-      console.error(`[heddlework-ssh] reconnected${await hostHealthy(tunnel.localPort) ? '' : ' (remote host is not answering yet)'}`)
+      log(`reconnected${await hostHealthy(tunnel.localPort) ? '' : ' (remote host is not answering yet)'}`)
     } catch (error) {
-      console.error(`[heddlework-ssh] ${error instanceof Error ? error.message : String(error)}`)
+      log(error instanceof Error ? error.message : String(error))
     }
+  }
+}
+
+export interface SshTunnelConnection {
+  localPort: number
+  url: string
+  token: string
+  workspacePath: string
+  /** Settles after close(); until then the tunnel reconnects with backoff when ssh exits. */
+  closed: Promise<void>
+  close(): void
+}
+
+// Opens, verifies, and supervises the tunnel. Shared by the CLI and the desktop remote mode.
+export async function connectSshTunnel(options: SshTunnelOptions, log: (message: string) => void = (message) => console.error(`[heddlework-ssh] ${message}`), signal?: AbortSignal): Promise<SshTunnelConnection> {
+  const localPort = options.localPort ?? stableLocalPort(options.target, options.remotePort)
+  await assertPortFree(localPort)
+  const tunnel = new Tunnel(options, localPort)
+  const close = (): void => tunnel.stop()
+  signal?.addEventListener('abort', close, { once: true })
+  const exited = tunnel.start()
+  try {
+    await tunnel.ready()
+    if (!await hostHealthy(localPort)) {
+      if (!options.start) throw new Error(`No Heddlework host answers on ${options.target} port ${options.remotePort}; start one there or pass --start --remote-dir DIR`)
+      log((await runSsh(options, startScript(options))).trim())
+      if (!await waitFor(() => hostHealthy(localPort), 60_000, () => tunnel.exitReason)) throw new Error('Remote host did not become healthy within 60s; check the remote log')
+    }
+    const token = parseToken(await runSsh(options, TOKEN_SCRIPT))
+    const { workspacePath } = await verifyHost(localPort, token)
+    return { localPort, url: `http://127.0.0.1:${localPort}`, token, workspacePath, closed: supervise(tunnel, exited, log), close }
+  } catch (error) {
+    close()
+    throw error
   }
 }
 
@@ -270,36 +305,19 @@ export async function main(argv: readonly string[]): Promise<void> {
   const parsed = parseArguments(argv)
   if (parsed.help) { console.log(USAGE); return }
   const { options } = parsed
-  const localPort = options.localPort ?? stableLocalPort(options.target, options.remotePort)
-  await assertPortFree(localPort)
-  const tunnel = new Tunnel(options, localPort)
-  const shutdown = (): void => tunnel.stop()
-  process.once('SIGINT', shutdown)
-  process.once('SIGTERM', shutdown)
-  const exited = tunnel.start()
-  try {
-    await tunnel.ready()
-    if (!await hostHealthy(localPort)) {
-      if (!options.start) throw new Error(`No Heddlework host answers on ${options.target} port ${options.remotePort}; start one there or pass --start --remote-dir DIR`)
-      const started = (await runSsh(options, startScript(options))).trim()
-      console.error(`[heddlework-ssh] ${started}`)
-      if (!await waitFor(() => hostHealthy(localPort), 60_000, () => tunnel.exitReason)) throw new Error('Remote host did not become healthy within 60s; check the remote log')
-    }
-    const token = parseToken(await runSsh(options, TOKEN_SCRIPT))
-    const { workspacePath } = await verifyHost(localPort, token)
-    console.log(`Heddlework over SSH: ${options.target} -> 127.0.0.1:${localPort}`)
-    if (workspacePath) console.log(`  workspace  ${workspacePath}`)
-    console.log(`  open       ${pairingUrl(localPort, token)}`)
-    console.log('Keep this running; Ctrl-C closes the tunnel. The link contains the host token.')
-  } catch (error) {
-    tunnel.stop()
-    throw error
-  }
-  await supervise(tunnel, exited)
+  const abort = new AbortController()
+  process.once('SIGINT', () => abort.abort())
+  process.once('SIGTERM', () => abort.abort())
+  const connection = await connectSshTunnel(options, undefined, abort.signal)
+  console.log(`Heddlework over SSH: ${options.target} -> 127.0.0.1:${connection.localPort}`)
+  if (connection.workspacePath) console.log(`  workspace  ${connection.workspacePath}`)
+  console.log(`  open       ${pairingUrl(connection.localPort, connection.token)}`)
+  console.log('Keep this running; Ctrl-C closes the tunnel. The link contains the host token.')
+  await connection.closed
 }
 
 if (import.meta.main) {
-  main(Bun.argv.slice(2)).catch((error: unknown) => {
+  main(Bun.argv.slice(2)).then(() => process.exit(0), (error: unknown) => {
     console.error(`[heddlework-ssh] ${error instanceof Error ? error.message : String(error)}`)
     process.exit(1)
   })
