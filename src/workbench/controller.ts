@@ -2170,7 +2170,6 @@ export function reconcileLiveTranscript(
   let liveAssistant = state.liveAssistant
   const completedTools = new Set<string>()
   for (const message of messages) {
-  for (const message of messages) {
     if (
       liveAssistant
       && message.role === 'assistant'
@@ -2189,10 +2188,6 @@ export function reconcileLiveTranscript(
     ) {
       liveAssistant = undefined
     }
-    if (message.role === 'toolResult' && typeof message.toolCallId === 'string') {
-      completedTools.add(message.toolCallId)
-    }
-  }
     if (message.role === 'toolResult' && typeof message.toolCallId === 'string') {
       completedTools.add(message.toolCallId)
     }
