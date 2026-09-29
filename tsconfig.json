@@ -5,6 +5,10 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "jsxImportSource": "@gpuix/react",
+    "paths": {
+      "@gpuix/react/jsx-runtime": ["./types/gpuix-jsx-runtime.d.ts"],
+      "@gpuix/react/jsx-dev-runtime": ["./types/gpuix-jsx-dev-runtime.d.ts"]
+    },
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
