@@ -1,0 +1,94 @@
+name: docker
+
+# Image builds follow the repo's opt-in pattern (like linux.yml): the native
+# build is heavy, so it runs when packaging inputs change or on dispatch.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.native'
+      - 'docker/**'
+      - '.dockerignore'
+      - 'package.json'
+      - 'bun.lock'
+      - 'gpuix-runtime.json'
+      - 'scripts/build-web.ts'
+      - '.github/workflows/docker.yml'
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - 'docker/**'
+      - '.dockerignore'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-host:
+    name: web host image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint Dockerfile
+        run: docker build --check -f Dockerfile .
+      - name: Build image
+        run: docker build -f Dockerfile -t heddlework:ci .
+      - name: Smoke test the workspace host
+        run: |
+          docker run -d --name hw-ci -p 4817:4817 \
+            -e HEDDLEWORK_HOST_ORIGINS=http://localhost:4817 \
+            -e HEDDLEWORK_HOST_PRINT_TOKEN=1 \
+            heddlework:ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4817/health | grep -q '"ok":true'; then
+              echo "health OK"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "host did not become healthy:" >&2
+          docker logs hw-ci >&2
+          exit 1
+      - name: Verify Pi, pi-fabric, and web client inside the container
+        run: |
+          test "$(docker exec hw-ci pi --version | cut -d. -f1)" -ge 1
+          docker exec hw-ci sh -c 'test -d /state/pi/agent/npm/node_modules/pi-fabric'
+          docker exec hw-ci sh -c 'test -f /app/dist/web/index.html'
+      - name: Exercise the pairing protocol (unauthenticated and authenticated)
+        run: |
+          # The web client must be served and the WebSocket endpoint must reject
+          # anonymous upgrades; a full chat round-trip needs provider credentials.
+          curl -fsS http://127.0.0.1:4817/ | grep -qi '<!doctype html'
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            http://127.0.0.1:4817/ws)
+          test "$code" = "401"
+      - name: Cleanup
+        if: always()
+        run: docker rm -f hw-ci >/dev/null 2>&1 || true
+
+  native-build:
+    name: native executable image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint Dockerfile.native
+        run: docker build --check -f Dockerfile.native .
+      # Only the toolchain stages are built on CI: the full compile duplicates the
+      # main check job's native build and the CI cache cannot be shared into Docker.
+      - name: Build through the toolchain stage
+        run: docker build -f Dockerfile.native --target build -t heddlework-build:ci .
+      - name: Verify the build toolchain and bun entry
+        run: |
+          docker run --rm --entrypoint sh heddlework-build:ci -c \
+            'bun --version && rustc --version && test -f /app/scripts/build.ts'

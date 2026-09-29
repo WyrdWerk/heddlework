@@ -1,0 +1,44 @@
+# Heddlework — native desktop executable builder image
+#
+# Compiles the standalone `heddlework` executable (GPUIX native runtime) for
+# linux/amd64. Rust + GPUI system libraries are required; the result is
+# copied to ./out so the host can run it without the toolchain.
+#
+# Build:
+#   docker build -f Dockerfile.native -t heddlework-build:latest .
+#   docker run --rm -v "$PWD/out:/out" heddlework-build:latest
+#
+# Run the produced executable on the host:
+#   HEDDLEWORK_PI="$(command -v pi)" ./out/heddlework /path/to/repository
+
+FROM rust:1-slim AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential clang pkg-config curl ca-certificates git unzip \
+      libfontconfig-dev libgl1-mesa-dri libssl-dev libvulkan1 \
+      libwayland-dev libx11-xcb-dev libxkbcommon-x11-dev libzstd-dev \
+      mesa-vulkan-drivers wayland-protocols x11-utils \
+ && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}" \
+    CARGO_INCREMENTAL=0 \
+    CARGO_PROFILE_RELEASE_DEBUG=0 \
+    HEDDLEWORK_KEEP_BUILD_CACHE=0
+
+WORKDIR /app
+COPY package.json bun.lock ./
+COPY patches ./patches
+RUN bun install --frozen-lockfile
+COPY gpuix-runtime.json tsconfig.json ./
+COPY scripts ./scripts
+COPY src ./src
+
+# Build the pinned GPUIX native runtime, then the standalone executable.
+# (GPUix sources are fetched by the installer itself via cargo/git.)
+RUN bun run setup:native && bun run build
+
+FROM alpine:3.20
+# Bind mounts shadow image content, so the artifact is copied out by the
+# container command rather than baked under /out.
+COPY --from=build /app/dist/heddlework /usr/local/bin/heddlework
+CMD ["sh", "-c", "mkdir -p /out && cp /usr/local/bin/heddlework /out/heddlework"]

@@ -99,6 +99,18 @@ bun run build
 ./dist/heddlework /path/to/repository
 ```
 
+### Guided installer
+
+`install.sh` automates the paths above. It first asks which harness the machine should run, then installs Pi and configures API providers:
+
+```bash
+./install.sh            # interactive menu
+./install.sh heddle     # Heddlework + Pi (native desktop; builds GPUIX, needs Rust)
+./install.sh pi         # Pi + Fabric (plain TUI; needs only Node.js)
+```
+
+The first menu option compiles the pinned GPUIX runtime and Heddlework itself; the second installs `pi` and `pi-fabric` and stops there. Either path offers each known provider in turn and stores the key in `~/.pi/agent/auth.json` with hidden input, owner-only (`0600`) permissions, and terminal echo restored if the entry is interrupted. Non-interactive runs (`HEDDLEWORK_NONINTERACTIVE=1`) never prompt: they copy provider keys out of the environment instead. Run `./install.sh --help` for every flag and variable. Interactive prompts are covered by a real-PTY harness; see [Installer PTY harness](tests/pty/README.md).
+
 ### Web workspace source preview
 
 The browser client renders the shared workbench UI and talks to the same controller used by the native window. Remote access is off by default. To build, start a loopback headless host, and print a fragment-based pairing link:
@@ -109,6 +121,27 @@ HEDDLEWORK_HOST_PRINT_TOKEN=1 bun run host -- /path/to/repository
 ```
 
 For rebuild-on-save development, use `bun run dev:web -- /path/to/repository` (optionally with `HEDDLEWORK_DEMO=1`). Open the printed `http://127.0.0.1:4817/#token=…` URL. Non-loopback access additionally requires `HEDDLEWORK_HOST_ALLOW_NETWORK=1` and exact `HEDDLEWORK_HOST_ORIGINS`; use HTTPS before sending pairing credentials over an untrusted network. See [Community web port](docs/community-web-port.md) for runnable LAN/TLS setups, authentication, terminal architecture, validation scope, source attribution, and current mobile limitations.
+
+### Container workspace host
+
+`Dockerfile` builds that same host — Bun, Node, Pi, and pi-fabric — without the Rust/GPUIX toolchain, so any machine with Docker can serve the browser client:
+
+```bash
+cp .env.example .env      # set HEDDLEWORK_HOST_ORIGINS and any provider keys
+docker compose up
+```
+
+```bash
+docker build -t heddlework:latest .
+docker run --rm -p 4817:4817 \
+  -e HEDDLEWORK_HOST_PRINT_TOKEN=1 \
+  -e HEDDLEWORK_HOST_ORIGINS=http://localhost:4817 \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -v "$PWD:/workspace" -v heddlework-state:/state \
+  heddlework:latest
+```
+
+Pi and the workspace host never run as root. The container starts as root only to drop privileges: with `HOST_UID`/`HOST_GID` it clones the shipped user's identity to match the host owner, so a bind-mounted workspace stays writable when agents edit files or run git. Pi's agent directory is seeded from the image on first boot and then lives in the `/state` volume, so sessions, `auth.json`, and installed extensions survive container replacement, while pre-seeded mounted state always wins. `Dockerfile.native` instead compiles the desktop executable for Linux and copies it into a mounted `/out` directory for the host to run. Both images are built and smoke-tested in [`.github/workflows/docker.yml`](.github/workflows/docker.yml).
 
 ### Linux desktop integration
 

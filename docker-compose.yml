@@ -1,0 +1,41 @@
+# Heddlework web workspace compose — Pi + pi-fabric over the browser client.
+#
+#   cp .env.example .env      # set HEDDLEWORK_HOST_ORIGINS (+ provider keys)
+#   docker compose up
+#
+# The pairing URL prints at startup while HEDDLEWORK_HOST_PRINT_TOKEN=1.
+# Provider keys live in .env (git-ignored); never commit real keys.
+
+services:
+  heddlework:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: heddlework:latest
+    restart: unless-stopped
+    ports:
+      - "${HEDDLEWORK_HOST_PORT:-4817}:4817"
+    environment:
+      # Required: exact browser origins allowed to connect (comma-separated).
+      HEDDLEWORK_HOST_ORIGINS: ${HEDDLEWORK_HOST_ORIGINS:?set HEDDLEWORK_HOST_ORIGINS in .env, e.g. http://localhost:4817}
+      HEDDLEWORK_HOST_PRINT_TOKEN: ${HEDDLEWORK_HOST_PRINT_TOKEN:-1}
+      # Bind-mount ownership: match the host user running compose (`id -u` / `id -g`).
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
+      # Optional: initial provider/model for Pi.
+      HEDDLEWORK_PROVIDER: ${HEDDLEWORK_PROVIDER:-}
+      HEDDLEWORK_MODEL: ${HEDDLEWORK_MODEL:-}
+      # API keys are read by Pi at runtime; pass only what you use.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+    volumes:
+      - ${HEDDLEWORK_WORKSPACE:-.}:/workspace
+      - heddlework-state:/state
+    working_dir: /workspace
+
+volumes:
+  heddlework-state:
