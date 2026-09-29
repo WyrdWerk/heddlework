@@ -22,6 +22,13 @@ Cases (each drives `install.sh` through `tests/pty/pty-run.py`):
   real Node is resolvable outside the case's PATH shim; set
   `PTY_REAL_NODE=/abs/path/to/node` to enable it (e.g. a Node that is not on
   `PATH` at all).
+- `custom-endpoint` — `--write-model-config` writes `models.json` from the
+  `HEDDLEWORK_OPENAI_*` variables, keeps an unrelated provider that is already in
+  the file, stores the key in `auth.json`, and references it from the environment
+  instead of inlining it.
+- `custom-endpoint-prompt` — the same endpoint collected interactively: every
+  provider prompt declined, the default provider id and API flavor accepted, and
+  the key never echoed to the terminal.
 - `desktop-launcher` — `packaging/linux/install-user.sh` completes on a PTY,
   stages binary/web/icon/launcher/desktop entry correctly, and the produced
   launcher executes through to the installed binary in the chosen workspace.

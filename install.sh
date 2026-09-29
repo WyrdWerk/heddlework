@@ -7,7 +7,12 @@
 #   ./install.sh pi-fabric    # alias of `pi`
 #
 # Honors: NO_COLOR=1, HEDDLEWORK_NONINTERACTIVE=1, HEDDLEWORK_PI, HEDDLEWORK_PROVIDER,
-#         HEDDLEWORK_MODEL, HEDDLEWORK_SKIP_PROVIDERS=1, HEDDLEWORK_SKIP_SETUP=1.
+#         HEDDLEWORK_MODEL, HEDDLEWORK_SKIP_PROVIDERS=1, HEDDLEWORK_SKIP_SETUP=1,
+#         HEDDLEWORK_OPENAI_BASE_URL, HEDDLEWORK_OPENAI_MODEL, HEDDLEWORK_OPENAI_API,
+#         HEDDLEWORK_OPENAI_NAME, HEDDLEWORK_OPENAI_KEY.
+#
+#   ./install.sh --write-model-config   # write models.json from the
+#                                       # HEDDLEWORK_OPENAI_* variables and exit
 set -eu
 
 REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -27,6 +32,23 @@ die()   { printf '%s\n' "${BOLD}error:${RESET} $*" >&2; exit 1; }
 
 is_interactive() {
   [ "${HEDDLEWORK_NONINTERACTIVE:-0}" != "1" ] && [ -t 0 ]
+}
+
+# Reads one line with terminal echo disabled and leaves it in HIDDEN_INPUT.
+# Echo is switched off before the prompt is printed: if the prompt came first, a
+# fast keypress could land between prompt and `stty -echo` and be echoed. Echo is
+# restored on every exit path, including Ctrl-C in the middle of the entry.
+read_hidden() { # read_hidden <prompt>
+  saved_stty=$(stty -g 2>/dev/null || true)
+  trap 'stty "$saved_stty" 2>/dev/null || stty echo 2>/dev/null || true; printf '\n'; exit 130' INT
+  stty -echo 2>/dev/null || true
+  printf '%s' "$1"
+  old_ifs=$IFS
+  IFS= read -r HIDDEN_INPUT || true
+  IFS=$old_ifs
+  stty "$saved_stty" 2>/dev/null || stty echo 2>/dev/null || true
+  trap - INT
+  printf '\n'
 }
 
 # ---------------------------------------------------------------------------
@@ -132,22 +154,135 @@ provider_default_model() {
 
 KNOWN_PROVIDERS='anthropic openai google xai openrouter groq cerebras mistral deepseek'
 
-write_auth_entry() { # write_auth_entry <provider> <key>
-  provider=$1
-  key=$2
-  mkdir -p "$PI_DIR"
-  # Args travel through the environment: bun and node disagree about argv offsets under `-e`.
+# Pi configuration is JSON, so writes go through a JavaScript runtime. Values
+# travel through the environment: bun and node disagree about argv offsets under
+# `-e`, and exporting explicitly avoids depending on how a shell scopes variable
+# assignments that prefix a function call.
+run_js() { # run_js <script> <destination-file>
   if command -v bun >/dev/null 2>&1; then
-    PI_AUTH_FILE="$AUTH_FILE" PI_AUTH_PROVIDER="$provider" PI_AUTH_KEY="$key" \
-      bun -e 'const fs=require("node:fs");let auth={};try{auth=JSON.parse(fs.readFileSync(process.env.PI_AUTH_FILE,"utf8"))}catch{};auth[process.env.PI_AUTH_PROVIDER]={type:"api_key",key:process.env.PI_AUTH_KEY};fs.writeFileSync(process.env.PI_AUTH_FILE,JSON.stringify(auth,null,2)+"\n",{mode:0o600})'
+    bun -e "$1"
   elif command -v node >/dev/null 2>&1; then
-    PI_AUTH_FILE="$AUTH_FILE" PI_AUTH_PROVIDER="$provider" PI_AUTH_KEY="$key" \
-      node -e 'const fs=require("node:fs");let auth={};try{auth=JSON.parse(fs.readFileSync(process.env.PI_AUTH_FILE,"utf8"))}catch{};auth[process.env.PI_AUTH_PROVIDER]={type:"api_key",key:process.env.PI_AUTH_KEY};fs.writeFileSync(process.env.PI_AUTH_FILE,JSON.stringify(auth,null,2)+"\n",{mode:0o600})'
+    node -e "$1"
   else
-    die "node or bun is required to write $AUTH_FILE"
+    die "node or bun is required to write $2"
   fi
+}
+
+AUTH_STORE_SCRIPT='const fs=require("node:fs");let auth={};try{auth=JSON.parse(fs.readFileSync(process.env.PI_AUTH_FILE,"utf8"))}catch{};if(!auth||typeof auth!=="object"||Array.isArray(auth))auth={};auth[process.env.PI_AUTH_PROVIDER]={type:"api_key",key:process.env.PI_AUTH_KEY};fs.writeFileSync(process.env.PI_AUTH_FILE,JSON.stringify(auth,null,2)+"\n",{mode:0o600})'
+
+write_auth_entry() { # write_auth_entry <provider> <key>
+  mkdir -p "$PI_DIR"
+  export PI_AUTH_FILE="$AUTH_FILE" PI_AUTH_PROVIDER="$1" PI_AUTH_KEY="$2"
+  run_js "$AUTH_STORE_SCRIPT" "$AUTH_FILE"
+  unset PI_AUTH_FILE PI_AUTH_PROVIDER PI_AUTH_KEY
   chmod 600 "$AUTH_FILE" 2>/dev/null || true
 }
+
+# ---------------------------------------------------------------------------
+# Custom OpenAI-compatible endpoint — writes <agent-dir>/models.json
+#
+# Pi reaches a non-default endpoint through models.json rather than an
+# environment variable: "providers.<id>" carries baseUrl, api, apiKey, and the
+# model ids to expose. A dedicated provider id leaves the built-in OpenAI
+# catalog intact, so both stay selectable in /model. Existing providers in the
+# file are preserved.
+# ---------------------------------------------------------------------------
+MODELS_FILE="$PI_DIR/models.json"
+
+MODELS_STORE_SCRIPT='const fs=require("node:fs");let config={};try{config=JSON.parse(fs.readFileSync(process.env.PI_MODELS_FILE,"utf8"))}catch{};if(!config||typeof config!=="object"||Array.isArray(config))config={};if(!config.providers||typeof config.providers!=="object"||Array.isArray(config.providers))config.providers={};config.providers[process.env.PI_MODELS_PROVIDER]={baseUrl:process.env.PI_MODELS_BASE_URL,api:process.env.PI_MODELS_API,apiKey:process.env.PI_MODELS_API_KEY,models:process.env.PI_MODELS_IDS.split(",").filter(Boolean).map(id=>({id}))};fs.writeFileSync(process.env.PI_MODELS_FILE,JSON.stringify(config,null,2)+"\n",{mode:0o600})'
+
+provider_env_name() { # provider_env_name <provider-id> -> CUSTOM_OPENAI_API_KEY
+  printf '%s_API_KEY' "$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')"
+}
+
+write_models_entry() { # write_models_entry <provider> <base-url> <api> <api-key> <model-ids>
+  mkdir -p "$PI_DIR"
+  export PI_MODELS_FILE="$MODELS_FILE" PI_MODELS_PROVIDER="$1" PI_MODELS_BASE_URL="$2" \
+    PI_MODELS_API="$3" PI_MODELS_API_KEY="$4" PI_MODELS_IDS="$5"
+  run_js "$MODELS_STORE_SCRIPT" "$MODELS_FILE"
+  unset PI_MODELS_FILE PI_MODELS_PROVIDER PI_MODELS_BASE_URL PI_MODELS_API PI_MODELS_API_KEY PI_MODELS_IDS
+  chmod 600 "$MODELS_FILE" 2>/dev/null || true
+}
+
+write_custom_endpoint() { # write_custom_endpoint <name> <base-url> <api> <model-ids> [key]
+  custom_name=$1
+  custom_base_url=$2
+  custom_api=$3
+  custom_models=$4
+  custom_key=${5:-}
+
+  case "$custom_base_url" in
+    http://*|https://*) ;;
+    *) warn "$custom_base_url has no http:// or https:// scheme; Pi appends request paths to it" ;;
+  esac
+
+  if [ -n "$custom_key" ]; then
+    # Pi resolves a stored credential by provider id, so the secret lives in
+    # auth.json. models.json only references an environment variable, which keeps
+    # the same endpoint usable where there is no auth.json (CI, containers).
+    write_auth_entry "$custom_name" "$custom_key"
+    custom_key_ref='${'"$(provider_env_name "$custom_name")"'}'
+  elif [ -n "${OPENAI_API_KEY:-}" ]; then
+    # A gateway fronting the same protocol usually reuses the OpenAI key.
+    write_auth_entry "$custom_name" "$OPENAI_API_KEY"
+    custom_key_ref='${OPENAI_API_KEY}'
+  else
+    # Local servers ignore credentials, but a missing key hides the models from
+    # /model, so a literal placeholder keeps them selectable.
+    custom_key_ref='local'
+  fi
+
+  write_models_entry "$custom_name" "$custom_base_url" "$custom_api" "$custom_key_ref" "$custom_models"
+  CUSTOM_ENDPOINT_NAME=$custom_name
+  CUSTOM_ENDPOINT_MODEL=$(printf '%s' "$custom_models" | cut -d, -f1)
+  info "$custom_name -> $custom_base_url (api: $custom_api, models: $custom_models)"
+  if [ -n "$custom_key" ]; then
+    info "key stored in $AUTH_FILE; export $(provider_env_name "$custom_name") where that file is unavailable"
+  fi
+}
+
+write_custom_endpoint_from_env() {
+  [ -n "${HEDDLEWORK_OPENAI_BASE_URL:-}" ] || die "HEDDLEWORK_OPENAI_BASE_URL is not set"
+  [ -n "${HEDDLEWORK_OPENAI_MODEL:-}" ] || die "HEDDLEWORK_OPENAI_MODEL is required alongside HEDDLEWORK_OPENAI_BASE_URL (comma-separate several model ids)"
+  write_custom_endpoint \
+    "${HEDDLEWORK_OPENAI_NAME:-custom-openai}" \
+    "$HEDDLEWORK_OPENAI_BASE_URL" \
+    "${HEDDLEWORK_OPENAI_API:-openai-completions}" \
+    "$HEDDLEWORK_OPENAI_MODEL" \
+    "${HEDDLEWORK_OPENAI_KEY:-}"
+}
+
+prompt_custom_endpoint() {
+  # The environment wins over the prompt, so an unattended run and an
+  # interactive one converge on the same configuration.
+  [ -z "${HEDDLEWORK_OPENAI_BASE_URL:-}" ] || return 0
+  printf 'Use a custom OpenAI-compatible base URL (Ollama, LM Studio, vLLM, LiteLLM, gateway)? [y/N] '
+  read -r answer || true
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *) return 0 ;;
+  esac
+  printf 'Base URL [http://localhost:11434/v1]: '
+  read -r custom_base_url || true
+  custom_base_url=${custom_base_url:-http://localhost:11434/v1}
+  printf 'Model ID (comma-separate several, e.g. qwen2.5-coder:7b): '
+  read -r custom_models || true
+  if [ -z "$custom_models" ]; then
+    warn "no model id given — skipping the custom endpoint; set HEDDLEWORK_OPENAI_BASE_URL and HEDDLEWORK_OPENAI_MODEL to add it later"
+    return 0
+  fi
+  printf 'Provider ID [custom-openai]: '
+  read -r custom_name || true
+  custom_name=${custom_name:-custom-openai}
+  printf 'API flavor [openai-completions]: '
+  read -r custom_api || true
+  custom_api=${custom_api:-openai-completions}
+  read_hidden 'API key (input hidden; press Enter for a local endpoint without auth): '
+  write_custom_endpoint "$custom_name" "$custom_base_url" "$custom_api" "$custom_models" "$HIDDEN_INPUT"
+}
+
+CUSTOM_ENDPOINT_NAME=''
+CUSTOM_ENDPOINT_MODEL=''
 
 setup_providers() {
   if [ "${HEDDLEWORK_SKIP_PROVIDERS:-0}" = "1" ]; then
@@ -181,23 +316,13 @@ setup_providers() {
         y|Y|yes|YES) ;;
         *) continue ;;
       esac
-      # Turn off echo BEFORE printing the prompt: if the prompt came first,
-      # a fast keypress could land between prompt and `stty -echo` and echo.
-      # Restore on every exit path, including Ctrl-C mid-entry.
-      saved_stty=$(stty -g 2>/dev/null || true)
-      trap 'stty "$saved_stty" 2>/dev/null || stty echo 2>/dev/null || true; printf '\n'; exit 130' INT
-      stty -echo 2>/dev/null || true
-      printf 'Paste the %s API key (input hidden, Ctrl-C cancels): ' "$provider"
-      old_ifs=$IFS
-      IFS= read -r key || true
-      IFS=$old_ifs
-      stty "$saved_stty" 2>/dev/null || stty echo 2>/dev/null || true
-      trap - INT
-      printf '\n'
+      read_hidden "Paste the $provider API key (input hidden, Ctrl-C cancels): "
+      key=$HIDDEN_INPUT
       [ -n "$key" ] || { warn "empty key for $provider — skipped"; continue; }
       write_auth_entry "$provider" "$key"
       info "$provider key written to $AUTH_FILE"
     done
+    prompt_custom_endpoint
   fi
 
   # Non-interactive / explicit: pick up provider keys from the environment.
@@ -211,6 +336,13 @@ setup_providers() {
       info "$provider key copied from $env_var into $AUTH_FILE"
     fi
   done
+
+  # Custom endpoint from the environment. Interactive collection above already
+  # covers the prompted case; these same variables drive the container
+  # entrypoint and CI through --write-model-config.
+  if [ -n "${HEDDLEWORK_OPENAI_BASE_URL:-}" ]; then
+    write_custom_endpoint_from_env
+  fi
 
   # Initial provider/model hints for the desktop app.
   if [ -n "${HEDDLEWORK_PROVIDER:-}" ] && [ -n "${HEDDLEWORK_MODEL:-}" ]; then
@@ -252,25 +384,42 @@ verify_pi() {
 # ---------------------------------------------------------------------------
 usage() {
   cat <<'EOF'
-Usage: install.sh [harness]
+Usage: install.sh [harness|--write-model-config]
 
 Harnesses:
   heddle      Heddlework + Pi — the native GPUIX desktop harness (default prompt)
   pi          Pi + Fabric — the plain terminal harness with pi-fabric installed
   pi-fabric   alias of `pi`
 
+Config only:
+  --write-model-config          write the custom OpenAI-compatible endpoint given
+                                by the HEDDLEWORK_OPENAI_* variables into
+                                models.json, then exit (no harness selection and
+                                no installation)
+
 Options (environment):
   HEDDLEWORK_NONINTERACTIVE=1   never prompt; use flags/env only
-  HEDDLEWORK_SKIP_PROVIDERS=1   do not touch ~/.pi/agent/auth.json
+  HEDDLEWORK_SKIP_PROVIDERS=1   do not touch ~/.pi/agent/auth.json or models.json
   HEDDLEWORK_SKIP_SETUP=1       skip the slow GPUIX native build (`bun run setup:native`)
   HEDDLEWORK_PI=/abs/path/pi    absolute Pi path for desktop launchers
   HEDDLEWORK_PROVIDER=...       initial provider passed to Pi
   HEDDLEWORK_MODEL=...          initial model passed to Pi
 
+Custom OpenAI-compatible endpoint (Ollama, LM Studio, vLLM, LiteLLM, a gateway):
+  HEDDLEWORK_OPENAI_BASE_URL    endpoint root, e.g. http://localhost:11434/v1
+  HEDDLEWORK_OPENAI_MODEL       model id(s) to expose, comma-separated
+  HEDDLEWORK_OPENAI_API         endpoint API flavor (default openai-completions)
+  HEDDLEWORK_OPENAI_NAME        provider id to create (default custom-openai)
+  HEDDLEWORK_OPENAI_KEY         key for the endpoint; defaults to OPENAI_API_KEY,
+                                otherwise to a placeholder local servers ignore
+
 Examples:
   ./install.sh                    # interactive menu
   ./install.sh heddle             # desktop harness
   HEDDLEWORK_PROVIDER=anthropic HEDDLEWORK_MODEL=claude-sonnet-4-5 ./install.sh pi
+  HEDDLEWORK_OPENAI_BASE_URL=http://localhost:11434/v1 \
+    HEDDLEWORK_OPENAI_MODEL=qwen2.5-coder:7b ./install.sh pi
+  ./install.sh --write-model-config            # models.json only, no install
 EOF
 }
 
@@ -313,6 +462,11 @@ EOF
 main() {
   case "${1:-}" in
     -h|--help) usage; exit 0 ;;
+    --write-model-config)
+      write_custom_endpoint_from_env
+      info "wrote $MODELS_FILE"
+      exit 0
+      ;;
   esac
   harness=$(select_harness "$@")
 
@@ -344,6 +498,9 @@ main() {
   else
     printf '  %spi /path/to/repository%s                  # start the TUI\n' "$BOLD" "$RESET"
     printf '  %s/fabric%s inside Pi opens the Fabric dashboard; /fabric settings tunes it\n' "$BOLD" "$RESET"
+  fi
+  if [ -n "$CUSTOM_ENDPOINT_NAME" ]; then
+    printf '  %sHEDDLEWORK_PROVIDER=%s HEDDLEWORK_MODEL=%s bun run start%s   # custom endpoint\n' "$BOLD" "$CUSTOM_ENDPOINT_NAME" "$CUSTOM_ENDPOINT_MODEL" "$RESET"
   fi
   printf '  %spi /login%s subscribes OAuth providers (Copilot etc.); API keys above are already wired\n' "$BOLD" "$RESET"
 }

@@ -25,6 +25,14 @@ services:
       # Optional: initial provider/model for Pi.
       HEDDLEWORK_PROVIDER: ${HEDDLEWORK_PROVIDER:-}
       HEDDLEWORK_MODEL: ${HEDDLEWORK_MODEL:-}
+      # Optional: point a custom OpenAI-compatible endpoint at Ollama, LM Studio,
+      # vLLM, LiteLLM, or a gateway. MODEL is required with BASE_URL. Use
+      # host.docker.internal on Docker Desktop, or the bridge address on Linux.
+      HEDDLEWORK_OPENAI_BASE_URL: ${HEDDLEWORK_OPENAI_BASE_URL:-}
+      HEDDLEWORK_OPENAI_MODEL: ${HEDDLEWORK_OPENAI_MODEL:-}
+      HEDDLEWORK_OPENAI_API: ${HEDDLEWORK_OPENAI_API:-openai-completions}
+      HEDDLEWORK_OPENAI_NAME: ${HEDDLEWORK_OPENAI_NAME:-custom-openai}
+      HEDDLEWORK_OPENAI_KEY: ${HEDDLEWORK_OPENAI_KEY:-}
       # API keys are read by Pi at runtime; pass only what you use.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

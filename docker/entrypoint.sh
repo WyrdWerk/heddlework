@@ -48,6 +48,18 @@ if [ ! -f "$AGENT_DIR/.heddlework-seeded" ]; then
   touch "$AGENT_DIR/.heddlework-seeded"
 fi
 
+# Optional custom OpenAI-compatible endpoint (Ollama, LM Studio, vLLM, LiteLLM,
+# a gateway). This reuses the installer's config-only mode, which accepts the
+# same HEDDLEWORK_OPENAI_* variables; the workspace user takes ownership of the
+# files afterwards so they stay editable inside the container.
+if [ -n "${HEDDLEWORK_OPENAI_BASE_URL:-}" ]; then
+  if sh /opt/heddlework/install.sh --write-model-config; then
+    [ "$(id -u)" = "0" ] && chown "${HOST_UID:-1000}:${HOST_GID:-1000}" "$AGENT_DIR"/*.json 2>/dev/null || true
+  else
+    echo "entrypoint: warning — could not write $AGENT_DIR/models.json" >&2
+  fi
+fi
+
 # Bind-mounted workspaces carry the host's numeric UID/GID. When the caller
 # provides HOST_UID/HOST_GID, clone the shipped `bun` user's identity to match
 # and take over /state, so Pi and agent tooling can write the workspace and

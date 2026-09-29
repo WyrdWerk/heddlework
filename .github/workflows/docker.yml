@@ -46,6 +46,9 @@ jobs:
           docker run -d --name hw-ci -p 4817:4817 \
             -e HEDDLEWORK_HOST_ORIGINS=http://localhost:4817 \
             -e HEDDLEWORK_HOST_PRINT_TOKEN=1 \
+            -e HEDDLEWORK_OPENAI_BASE_URL=http://host.docker.internal:11434/v1 \
+            -e HEDDLEWORK_OPENAI_MODEL=qwen2.5-coder:7b \
+            -e HEDDLEWORK_OPENAI_KEY=sk-ci-custom \
             heddlework:ci
           for attempt in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:4817/health | grep -q '"ok":true'; then
@@ -62,6 +65,17 @@ jobs:
           test "$(docker exec hw-ci pi --version | cut -d. -f1)" -ge 1
           docker exec hw-ci sh -c 'test -d /state/pi/agent/npm/node_modules/pi-fabric'
           docker exec hw-ci sh -c 'test -f /app/dist/web/index.html'
+      - name: Verify the custom endpoint written by the entrypoint
+        run: |
+          # The entrypoint configures HEDDLEWORK_OPENAI_* through the installer's
+          # --write-model-config mode: base URL and model ids in models.json, the
+          # key in auth.json, and an environment reference instead of an inlined
+          # secret.
+          docker exec hw-ci grep -q 'host.docker.internal:11434/v1' /state/pi/agent/models.json
+          docker exec hw-ci grep -q 'qwen2.5-coder:7b' /state/pi/agent/models.json
+          docker exec hw-ci grep -q 'CUSTOM_OPENAI_API_KEY' /state/pi/agent/models.json
+          docker exec hw-ci grep -q 'sk-ci-custom' /state/pi/agent/auth.json
+          docker exec hw-ci sh -c 'test "$(stat -c %a /state/pi/agent/models.json)" = 600'
       - name: Exercise the pairing protocol (unauthenticated and authenticated)
         run: |
           # The web client must be served and the WebSocket endpoint must reject

@@ -87,6 +87,11 @@ COPY --chown=bun:bun package.json tsconfig.json ./
 COPY --chown=bun:bun docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 755 /usr/local/bin/entrypoint.sh
 
+# A custom OpenAI-compatible endpoint is configured by the installer's
+# config-only mode, so the container and a desktop install write the same
+# models.json instead of drifting apart.
+COPY install.sh /opt/heddlework/install.sh
+
 # The entrypoint starts as root only to drop privileges (HOST_UID/HOST_GID
 # remapping for bind-mounted workspaces); it execs bun as uid 1000 or the
 # requested identity and never runs the workspace host as root.

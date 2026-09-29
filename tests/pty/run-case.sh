@@ -23,12 +23,33 @@ ln -sf "$REPO/tests/pty/mock-pi.sh" "$WORK/bin/pi"
 ln -sf "$REPO/tests/pty/mock-pi.sh" "$WORK/bin/node"
 export PATH="$WORK/bin:$PATH"
 
+# The mocked `node` on PATH keeps `need_node` satisfied on machines that have no
+# Node at all, but it cannot evaluate the installer's JSON writer. Resolve one
+# real interpreter for the cases that assert on written files; they skip when
+# there is none. Set PTY_REAL_NODE=/abs/path/to/node for a Node that is not on
+# PATH at all (nvm, an unpacked tarball, ...).
+if [ -n "${PTY_REAL_NODE:-}" ]; then
+  :
+else
+  PTY_REAL_NODE=$(PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx -- "$WORK/bin" | tr '\n' ':' | sed 's/:$//') \
+    command -v node 2>/dev/null || true)
+  [ -n "$PTY_REAL_NODE" ] && [ -x "$PTY_REAL_NODE" ] && export PTY_REAL_NODE || PTY_REAL_NODE=''
+fi
+
+need_real_node() { # need_real_node <case>
+  if [ -z "${PTY_REAL_NODE:-}" ]; then
+    printf 'SKIP(%s): no real JavaScript runtime outside the PATH shim (set PTY_REAL_NODE to enable)\n' "$1"
+    exit 0
+  fi
+  ln -sf "$PTY_REAL_NODE" "$WORK/bin/node"
+}
+
 fail() { printf 'FAIL(%s): %s\n' "$CASE" "$*" >&2; exit 1; }
 pass() { printf 'PASS(%s): %s\n' "$CASE" "$*"; }
 CASE_HARNESS_ARGS=()
 # One of: menu-default menu-pi hidden-input already-configured ctrl-c
 #         eof-default bun-prompt-decline bun-install-accept auth-write
-#         desktop-launcher
+#         custom-endpoint custom-endpoint-prompt desktop-launcher
 
 run_steps() { # steps-file extra-env...
   local steps=$1; shift
@@ -77,17 +98,8 @@ case "$CASE" in
   # at one that is not on PATH at all (nvm, a tarball under /tmp, ...).
   auth-write)
     CASE_HARNESS_ARGS=(pi)
-    real_node=${PTY_REAL_NODE:-}
-    if [ -z "$real_node" ]; then
-      real_node=$(PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx -- "$WORK/bin" | tr '\n' ':' | sed 's/:$//') \
-        command -v node 2>/dev/null || true)
-    fi
-    if [ -z "$real_node" ] || [ ! -x "$real_node" ]; then
-      printf 'SKIP(auth-write): no real node outside the PATH shims (set PTY_REAL_NODE to enable)\n'
-      exit 0
-    fi
+    need_real_node auth-write
     mkdir -p "$PI_CODING_AGENT_DIR"
-    ln -sf "$real_node" "$WORK/bin/node"
     printf 'WAIT:Configure anthropic\ny\nWAIT:input hidden\nsk-ant-AUTHWRITE-1\nWAIT:Configure openai\nENTER\n' > "$WORK/steps"
     run_steps "$WORK/steps" HEDDLEWORK_SKIP_PROVIDERS=0 || true
     grep -q 'anthropic key written' "$LOG" || fail "key was not accepted"
@@ -95,6 +107,64 @@ case "$CASE" in
     grep -q 'sk-ant-AUTHWRITE-1' "$PI_CODING_AGENT_DIR/auth.json" || fail "auth.json missing the key"
     stat -c '%a' "$PI_CODING_AGENT_DIR/auth.json" | grep -Eq '^600$' || fail "auth.json is not 0600"
     pass "node fallback wrote auth.json with 0600"
+    ;;
+
+  # Custom OpenAI-compatible endpoint, environment-driven: --write-model-config
+  # is the mode the container entrypoint uses, and it must leave an unrelated
+  # provider that is already in models.json untouched.
+  custom-endpoint)
+    CASE_HARNESS_ARGS=(--write-model-config)
+    need_real_node custom-endpoint
+    mkdir -p "$PI_CODING_AGENT_DIR"
+    printf '{"providers":{"existing":{"baseUrl":"http://example.test/v1","api":"openai-completions","models":[{"id":"keep-me"}]}}}\n' \
+      > "$PI_CODING_AGENT_DIR/models.json"
+    printf 'WAIT:custom-openai -> http://127.0.0.1:11434/v1\n' > "$WORK/steps"
+    run_steps "$WORK/steps" \
+      HEDDLEWORK_OPENAI_BASE_URL="http://127.0.0.1:11434/v1" \
+      HEDDLEWORK_OPENAI_MODEL="qwen2.5-coder:7b,llama3.1:8b" \
+      HEDDLEWORK_OPENAI_KEY="sk-custom-ENV-1" || fail "--write-model-config exited non-zero"
+
+    models="$PI_CODING_AGENT_DIR/models.json"
+    grep -q '"baseUrl": "http://127.0.0.1:11434/v1"' "$models" || fail "baseUrl missing from models.json"
+    grep -q '"api": "openai-completions"' "$models" || fail "api flavor missing from models.json"
+    grep -q '"id": "qwen2.5-coder:7b"' "$models" || fail "first model id missing"
+    grep -q '"id": "llama3.1:8b"' "$models" || fail "second model id missing"
+    grep -q '"id": "keep-me"' "$models" || fail "existing provider was dropped from models.json"
+    grep -q '"apiKey": "${CUSTOM_OPENAI_API_KEY}"' "$models" || fail "endpoint key should be read from the environment, not inlined"
+    [ "$(stat -c '%a' "$models")" = "600" ] || fail "models.json is not 0600"
+    grep -q '"key": "sk-custom-ENV-1"' "$PI_CODING_AGENT_DIR/auth.json" || fail "endpoint key not stored in auth.json"
+    pass "env endpoint wrote models.json, kept the existing provider, and stored the key"
+    ;;
+
+  # The same endpoint collected interactively: decline every provider prompt,
+  # then accept the defaults for provider id and API flavor. The key is entered
+  # through the hidden prompt, so it must never reach the terminal.
+  custom-endpoint-prompt)
+    CASE_HARNESS_ARGS=(pi)
+    need_real_node custom-endpoint-prompt
+    mkdir -p "$PI_CODING_AGENT_DIR"
+    {
+      for provider in anthropic openai google xai openrouter groq cerebras mistral deepseek; do
+        printf 'WAIT:Configure %s\nENTER\n' "$provider"
+      done
+      printf 'WAIT:Use a custom OpenAI-compatible base URL\ny\n'
+      printf 'WAIT:Base URL\nhttp://127.0.0.1:11434/v1\n'
+      printf 'WAIT:Model ID\nqwen2.5-coder:7b\n'
+      printf 'WAIT:Provider ID\nENTER\n'
+      printf 'WAIT:API flavor\nENTER\n'
+      printf 'WAIT:API key\nsk-custom-PROMPT-1\n'
+    } > "$WORK/steps"
+    run_steps "$WORK/steps" HEDDLEWORK_SKIP_PROVIDERS=0 || fail "interactive run exited non-zero"
+
+    grep -q 'custom-openai -> http://127.0.0.1:11434/v1 (api: openai-completions' "$LOG" \
+      || fail "prompt did not fall back to the default provider id and API flavor"
+    grep -q 'sk-custom-PROMPT-1' "$LOG" && fail "endpoint key echoed to the terminal"
+    models="$PI_CODING_AGENT_DIR/models.json"
+    grep -q '"id": "qwen2.5-coder:7b"' "$models" || fail "prompted model id missing from models.json"
+    grep -q '"key": "sk-custom-PROMPT-1"' "$PI_CODING_AGENT_DIR/auth.json" || fail "prompted key not stored in auth.json"
+    grep -q 'HEDDLEWORK_PROVIDER=custom-openai HEDDLEWORK_MODEL=qwen2.5-coder:7b' "$LOG" \
+      || fail "next steps did not show how to launch the custom endpoint"
+    pass "prompt collected the endpoint, kept the key hidden, and printed the launch hint"
     ;;
 
   ctrl-c)
