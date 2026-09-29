@@ -14,11 +14,14 @@ const { TerminalFontControl } = await import('../src/ui/settings-view.tsx')
 
 function renderFontControl(viewportWidth: number): string {
   return renderToStaticMarkup(
-    React.createElement(
-      ResponsiveLayoutProvider,
-      { layout: resolveResponsiveLayout(viewportWidth) },
-      React.createElement(TerminalFontControl, { value: 'ui-monospace', testId: 'terminal-font-family', onApply: () => {} }),
-    ),
+    React.createElement(ResponsiveLayoutProvider, {
+      layout: resolveResponsiveLayout(viewportWidth),
+      children: React.createElement(TerminalFontControl, {
+        value: 'ui-monospace',
+        testId: 'terminal-font-family',
+        onApply: () => {},
+      }),
+    }),
   )
 }
 
