@@ -41,7 +41,7 @@ export class RemoteWorkbenchController {
   async pause(): Promise<void> { await this.#send({ type: 'pause' }) }
   async abort(): Promise<void> { await this.#send({ type: 'abort' }) }
   async newSession(): Promise<void> { await this.#send({ type: 'newSession' }) }
-  async switchWorkspace(): Promise<void> { this.notify('warning', 'Switch workspaces from the host desktop') }
+  async switchWorkspace(workspacePath: string): Promise<void> { await this.#send({ type: 'switchWorkspace', path: workspacePath }) }
   async switchSession(session: PiSessionSummary): Promise<void> { await this.#send({ type: 'switchSession', path: session.path }) }
   async refreshSessions(): Promise<void> { await this.#send({ type: 'refreshSessions' }) }
   async loadMoreSessions(): Promise<void> { await this.#send({ type: 'loadMoreSessions' }) }

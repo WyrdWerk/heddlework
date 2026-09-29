@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { useGpuixRequired, useWindowInsets, useWindowSize } from '@gpuix/react'
 import type { WorkbenchController } from '../workbench/controller.ts'
 import type { FlowRuntime } from '../flows/runtime.ts'
+import type { HostSwitcherSurface } from '../client/host-switcher.ts'
 import { ChatHeader } from './chat-header.tsx'
 import { Composer } from './composer.tsx'
 import { ConversationExtensionOverlay } from './conversation-overlay.tsx'
@@ -52,6 +53,7 @@ export function WorkbenchApp({
   browsers,
   themeManager = defaultThemeManager,
   onQuit,
+  hostSwitcher,
 }: {
   controller: WorkbenchController
   presenters: ReadonlyMap<string, ToolPresenter>
@@ -61,6 +63,7 @@ export function WorkbenchApp({
   browsers?: BrowserSessionService
   themeManager?: ThemeManager
   onQuit?(): void
+  hostSwitcher?: HostSwitcherSurface | undefined
 }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
   const theme = useSyncExternalStore(themeManager.subscribe, themeManager.getSnapshot)
@@ -361,7 +364,7 @@ export function WorkbenchApp({
             <div testId="workbench-main" style={{ position: 'relative', display: 'flex', flexDirection: 'row', flexGrow: 1, minWidth: 0, height: '100%', backgroundColor: colors.background, overflow: 'hidden' }}>
               <MotionDiv initial={false} animate={{ flexGrow: conversationFlexGrow }} transition={LAYOUT_MOTION_TRANSITION} style={{ display: 'flex', flexDirection: 'column', width: 0, flexGrow: conversationFlexGrow, minWidth: 0, height: '100%', overflow: 'hidden' }}>
                 <MotionDiv initial={false} animate={{ height: chatHeaderHeight }} transition={LAYOUT_MOTION_TRANSITION} style={{ height: chatHeaderHeight, flexShrink: 0, overflow: 'hidden' }}>
-                  <ChatHeader state={state} controller={controller} diffOpen={diffOpen} terminalOpen={bottomTerminalOpen} leftSidebarProgress={layout.navigationOverlay ? 0 : animatedSidebarProgress} onToggleDiff={toggleDiff} {...(terminals ? { onToggleTerminal: toggleBottomTerminal } : {})} />
+                  <ChatHeader state={state} controller={controller} diffOpen={diffOpen} terminalOpen={bottomTerminalOpen} leftSidebarProgress={layout.navigationOverlay ? 0 : animatedSidebarProgress} onToggleDiff={toggleDiff} {...(terminals ? { onToggleTerminal: toggleBottomTerminal } : {})} hostSwitcher={hostSwitcher} />
                 </MotionDiv>
                 <MotionDiv initial={false} animate={{ flexGrow: conversationBodyFlexGrow }} transition={LAYOUT_MOTION_TRANSITION} testId="conversation-body" style={{ position: 'relative', display: 'flex', flexDirection: 'column', flexGrow: conversationBodyFlexGrow, minHeight: 0, overflow: 'hidden' }}>
                   {draft ? (

@@ -4,15 +4,17 @@ import { workbenchControllerToken } from '../workbench/plugins.ts'
 import { terminalSessionToken } from '../terminal/plugin.ts'
 import { createWorkspaceHost, DEFAULT_HOST_BIND, DEFAULT_HOST_PORT, type WorkspaceHost } from './server.ts'
 import { loadOrCreateHostToken } from './token.ts'
+import { loadOrCreateHostIdentity } from './identity.ts'
+import type { HostIdentity } from '../protocol/host-identity.ts'
 
 export interface WorkspaceHostPluginOptions {
-  enabled: boolean; workspacePath: string; port?: number; hostname?: string; tokenPath?: string | false; token?: string; staticRoot?: string; allowNetwork?: boolean; allowedOrigins?: readonly string[]
+  enabled: boolean; workspacePath: string; port?: number; hostname?: string; tokenPath?: string | false; token?: string; staticRoot?: string; allowNetwork?: boolean; allowedOrigins?: readonly string[]; identity?: HostIdentity
 }
 export const workspaceHostToken = serviceToken<WorkspaceHost | undefined>('workspace-host')
 export function createWorkspaceHostPlugin(options: WorkspaceHostPluginOptions): WorkbenchPlugin {
   return { id: 'workspace-host', requires: [workbenchControllerToken, flowRuntimeToken, terminalSessionToken], activate(ctx) {
     if (!options.enabled) { ctx.provide(workspaceHostToken, undefined); return }
-    const host = createWorkspaceHost({ controller: ctx.get(workbenchControllerToken), flows: ctx.get(flowRuntimeToken), workspacePath: options.workspacePath, port: options.port ?? DEFAULT_HOST_PORT, hostname: options.hostname ?? DEFAULT_HOST_BIND, token: options.token ?? loadOrCreateHostToken(options.tokenPath ?? false), terminals: ctx.get(terminalSessionToken), ...(options.staticRoot ? { staticRoot: options.staticRoot } : {}), ...(options.allowNetwork === undefined ? {} : { allowNetwork: options.allowNetwork }), ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}) })
+    const host = createWorkspaceHost({ controller: ctx.get(workbenchControllerToken), flows: ctx.get(flowRuntimeToken), workspacePath: options.workspacePath, port: options.port ?? DEFAULT_HOST_PORT, hostname: options.hostname ?? DEFAULT_HOST_BIND, token: options.token ?? loadOrCreateHostToken(options.tokenPath ?? false), identity: options.identity ?? loadOrCreateHostIdentity({ path: options.tokenPath ? undefined : false }), terminals: ctx.get(terminalSessionToken), ...(options.staticRoot ? { staticRoot: options.staticRoot } : {}), ...(options.allowNetwork === undefined ? {} : { allowNetwork: options.allowNetwork }), ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}) })
     ctx.provide(workspaceHostToken, host); ctx.effect(() => () => host.close())
   } }
 }

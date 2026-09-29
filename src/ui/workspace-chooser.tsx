@@ -34,6 +34,8 @@ export function DraftWorkspaceChooser({ state, controller }: { state: WorkbenchS
   const dropdown = useDropdownState()
   const [picking, setPicking] = useState(false)
   const [query, setQuery] = useState('')
+  const [manual, setManual] = useState(false)
+  const [manualPath, setManualPath] = useState('')
   const choices = useMemo(() => workspaceChoices(state), [state.sessions, state.workspacePath])
   const current = choices[0]!
   const choicesByPath = useMemo(() => new Map(choices.map((choice) => [choice.path, choice])), [choices])
@@ -49,12 +51,21 @@ export function DraftWorkspaceChooser({ state, controller }: { state: WorkbenchS
     if (picking) return
     setPicking(true)
     void pickWorkspaceDirectory().then((pick) => {
-      if (pick.error) controller.notify('error', pick.error)
+      // Web has no OS picker: fall back to typing a host path inline.
+      if (pick.error) { setManual(true); dropdown.setOpen(true) }
       else if (pick.path) void controller.switchWorkspace(pick.path)
+      if (pick.path) closeMenu()
     }).finally(() => {
       setPicking(false)
-      closeMenu()
     })
+  }
+  const submitManual = () => {
+    const target = manualPath.trim()
+    if (!target) return
+    closeMenu()
+    setManual(false)
+    setManualPath('')
+    void controller.switchWorkspace(target)
   }
   return (
     <div testId="draft-workspace" style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', flexGrow: 1, minHeight: 0, width: '100%', paddingLeft: layout.contentGutter, paddingRight: layout.contentGutter, paddingBottom: layout.mobile ? 42 : 74, ...(layout.mobile ? { overflow: 'scroll' } : {}) }}>
@@ -99,6 +110,17 @@ export function DraftWorkspaceChooser({ state, controller }: { state: WorkbenchS
                 <Icon name="folderPlus" size={16} color={colors.textMuted} />
                 <text style={{ color: colors.text, fontSize: 12, fontWeight: 550 }}>{picking ? 'Choosing project…' : 'New project'}</text>
               </div>
+              {manual ? (
+                <div testId="workspace-manual-path-row" style={{ height: 34, flexShrink: 0, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 9, paddingRight: 9, borderRadius: 7, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.input }}>
+                  <Icon name="folder" size={13} color={colors.textFaint} />
+                  <input testId="workspace-manual-path" value={manualPath} autoFocus placeholder="/absolute/path on the host · ~ works" theme={{ caret: colors.text, text: colors.text, textMuted: colors.textFaint, bg: colors.transparent }} style={{ minWidth: 0, flexGrow: 1, height: 30, borderWidth: 0, backgroundColor: colors.transparent, color: colors.text, fontSize: 11 }} onChange={(event) => setManualPath(String(event.value ?? ''))} onKeyDown={(event) => { if (event.key === 'enter') submitManual(); if (event.key === 'escape') setManual(false) }} />
+                </div>
+              ) : (
+                <div testId="workspace-manual-toggle" tabIndex={0} style={{ height: 30, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 10, paddingRight: 10, borderRadius: 8, cursor: 'pointer', hover: { backgroundColor: colors.hover } }} onClick={() => setManual(true)} onKeyDown={(event) => { if (event.key === 'enter') setManual(true) }}>
+                  <Icon name="terminal" size={13} color={colors.textMuted} />
+                  <text style={{ color: colors.textFaint, fontSize: 11 }}>Type a host path…</text>
+                </div>
+              )}
             </DropdownSurface>
           </div>
           </>

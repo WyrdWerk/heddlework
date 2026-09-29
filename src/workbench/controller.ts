@@ -2146,6 +2146,10 @@ function compactionMessageFrom(value: unknown): PiMessage | undefined {
   }
 }
 
+function liveAssistantText(live: { blocks: ReadonlyArray<{ kind: string; text: string }> }): string {
+  return live.blocks.filter((block) => block.kind === 'text').map((block) => block.text).join('')
+}
+
 function sameCompactionMessage(candidate: PiMessage, message: PiMessage): boolean {
   return candidate.role === 'compaction'
     && contentText(candidate.content) === contentText(message.content)
@@ -2153,7 +2157,7 @@ function sameCompactionMessage(candidate: PiMessage, message: PiMessage): boolea
 }
 
 /** Drop only live rows already represented by the authoritative transcript. Adapted from 0xCUB3/heddlework d196b0c. */
-function reconcileLiveTranscript(
+export function reconcileLiveTranscript(
   state: WorkbenchState,
   messages: PiMessage[],
 ): Pick<WorkbenchState, 'liveAssistant' | 'liveTools'> {
@@ -2166,6 +2170,7 @@ function reconcileLiveTranscript(
   let liveAssistant = state.liveAssistant
   const completedTools = new Set<string>()
   for (const message of messages) {
+  for (const message of messages) {
     if (
       liveAssistant
       && message.role === 'assistant'
@@ -2173,7 +2178,21 @@ function reconcileLiveTranscript(
       && liveAssistant.id === `live-${message.timestamp}`
     ) {
       liveAssistant = undefined
+    } else if (
+      // beginMessage mints the live id from Date.now() when the RPC event has no
+      // timestamp yet, so the persisted timestamp can never match it. Fall back to
+      // content: once the transcript carries the same text, the live row is redundant.
+      liveAssistant
+      && message.role === 'assistant'
+      && liveAssistantText(liveAssistant) !== ''
+      && liveAssistantText(liveAssistant) === contentText(message.content)
+    ) {
+      liveAssistant = undefined
     }
+    if (message.role === 'toolResult' && typeof message.toolCallId === 'string') {
+      completedTools.add(message.toolCallId)
+    }
+  }
     if (message.role === 'toolResult' && typeof message.toolCallId === 'string') {
       completedTools.add(message.toolCallId)
     }

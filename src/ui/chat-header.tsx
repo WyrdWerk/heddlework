@@ -4,7 +4,9 @@ import { basename } from 'node:path'
 import { Select, SelectContent, SelectItem, SelectTrigger, type SelectItemState, type SelectTriggerState } from '@gpuix/react'
 import type { WorkbenchController } from '../workbench/controller.ts'
 import { contentText, type WorkbenchState } from '../workbench/state.ts'
+import type { HostSwitcherSurface } from '../client/host-switcher.ts'
 import { DropdownSurface, useDropdownState } from './dropdown.tsx'
+import { HostSwitcherChip } from './host-picker.tsx'
 import { Button, IconButton } from './primitives.tsx'
 import { Icon } from './icons.tsx'
 import { openPath } from './open-external.ts'
@@ -25,6 +27,7 @@ export function ChatHeader({
   leftSidebarProgress,
   onToggleDiff,
   onToggleTerminal,
+  hostSwitcher,
 }: {
   state: WorkbenchState
   controller: WorkbenchController
@@ -33,6 +36,7 @@ export function ChatHeader({
   leftSidebarProgress: number
   onToggleDiff(): void
   onToggleTerminal?(): void
+  hostSwitcher?: HostSwitcherSurface | undefined
 }) {
   const projectName = basename(state.workspacePath) || state.workspacePath
   const title = activeThreadTitle(state)
@@ -46,6 +50,12 @@ export function ChatHeader({
       style={{ height: 52, flexShrink: 0, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: layout.mobile ? 5 : 10, paddingLeft: 20 + (collapsedLeftInset - 20) * (1 - leftSidebarProgress), paddingRight: layout.mobile ? 8 : 12, backgroundColor: colors.background, userSelect: 'none' }}
     >
       <div testId="chat-breadcrumb" style={{ minWidth: 0, flexGrow: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+        {hostSwitcher ? (
+          <>
+            <HostSwitcherChip switcher={hostSwitcher} compact={layout.mobile} />
+            {!layout.mobile && <text style={{ color: colors.textFaint, fontSize: 12 }}>›</text>}
+          </>
+        ) : null}
         {!layout.mobile && (
           <>
             <Icon name="folder" size={14} color={colors.textFaint} />

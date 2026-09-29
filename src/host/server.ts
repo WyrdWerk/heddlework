@@ -1,4 +1,5 @@
 import { existsSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import type { FlowRuntime } from '../flows/runtime.ts'
 import { applyWorkbenchCommand, diffSnapshots, encodeFrames, FrameAssembler, isPatchEmpty, parseClientMessage, PROTOCOL_VERSION, serializeSnapshot, utf8ByteLength, MAX_WS_FRAME_BYTES, type ServerMessage, type WorkbenchSnapshot } from '../protocol/index.ts'
@@ -7,6 +8,7 @@ import type { TerminalSessionService } from '../terminal/service.ts'
 import type { RemoteTerminalFrame, RemoteTerminalSnapshot } from '../protocol/terminal.ts'
 import { CommandReplayCache } from './command-replay.ts'
 import { timingSafeEqualToken } from './token.ts'
+import type { HostIdentity } from '../protocol/host-identity.ts'
 
 export interface WorkspaceHostOptions {
   controller: WorkbenchController
@@ -19,6 +21,7 @@ export interface WorkspaceHostOptions {
   allowNetwork?: boolean
   allowedOrigins?: readonly string[]
   terminals?: TerminalSessionService
+  identity?: HostIdentity
 }
 export interface WorkspaceHost {
   readonly url: string; readonly port: number; readonly hostname: string; readonly token: string; readonly workspacePath: string
@@ -48,7 +51,7 @@ export const MAX_SERVER_QUEUED_BYTES = 8 * 1024 * 1024
 export const SERVER_MESSAGE_LIFETIME_MS = 30_000
 const SEND_RETRY_MS = 25
 const SECURITY_HEADERS = {
-  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
   'referrer-policy': 'no-referrer',
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
@@ -104,7 +107,7 @@ export function createWorkspaceHost(options: WorkspaceHostOptions): WorkspaceHos
           socket.data.clientId = message.clientId
           const snapshot = socketSnapshot(socket, options.controller)
           socket.data.lastSnapshot = snapshot
-          send(socket, { kind: 'welcome', protocol: PROTOCOL_VERSION, workspacePath: options.workspacePath, snapshot, flows: options.flows.getSnapshot(), ...(options.terminals ? { terminal: serializeRemoteTerminal(options.terminals) } : {}) })
+          send(socket, { kind: 'welcome', protocol: PROTOCOL_VERSION, workspacePath: snapshot.workspacePath, snapshot, flows: options.flows.getSnapshot(), ...(options.terminals ? { terminal: serializeRemoteTerminal(options.terminals) } : {}), ...(options.identity ? { host: options.identity } : {}) })
           if (options.terminals) for (const session of options.terminals.getStateSnapshot().sessions) { const frame = serializeRemoteTerminalFrame(options.terminals, session.id); if (frame) send(socket, { kind: 'terminalFrame', frame }) }
           return
         }
@@ -116,6 +119,7 @@ export function createWorkspaceHost(options: WorkspaceHostOptions): WorkspaceHos
           if (closed || !sockets.has(socket)) throw new Error('Workspace host is closing')
           const result = await replay.execute(clientId, message.id, message.command, async () => {
             if (message.command.type === 'loadEarlierMessages') { await revealEarlierMessages(socket, options.controller); pushSocketSnapshot(socket, options.controller); return }
+            if (message.command.type === 'switchWorkspace') { const target = expandWorkspacePath(message.command.path); assertWorkspaceDirectory(target); return options.controller.switchWorkspace(realpathSync(resolve(target))) }
             return applyWorkbenchCommand(options.controller, message.command, options.terminals ? { terminals: options.terminals } : {})
           })
           if (!closed && sockets.has(socket)) send(socket, result)
@@ -193,6 +197,17 @@ function validOrigin(request: Request, hostname: string, allowed: Set<string>): 
 }
 function normalizeOrigin(value: string): string { try { const url = new URL(value); return url.origin } catch { throw new Error(`Invalid allowed origin: ${value}`) } }
 export function isLoopbackHost(hostname: string): boolean { const clean = hostname.replace(/^\[|\]$/g, '').toLowerCase(); return clean === 'localhost' || clean === '::1' || /^127(?:\.\d{1,3}){3}$/.test(clean) }
+
+// Remote switchWorkspace targets must exist on this machine before the controller tries to open them.
+function assertWorkspaceDirectory(path: string): void { const target = resolve(path); if (!existsSync(target) || !statSync(target).isDirectory()) throw new Error('Workspace path must be an existing directory') }
+
+// The browser types paths against the host's home: '~/projects/x' is the natural spelling.
+export function expandWorkspacePath(path: string, home = homedir()): string {
+  const trimmed = path.trim()
+  if (trimmed === '~') return home
+  if (trimmed.startsWith('~/')) return join(home, trimmed.slice(2))
+  return trimmed
+}
 interface OutboundMessage {
   frames: string[]
   frameBytes: number[]
@@ -336,7 +351,10 @@ function serveStatic(root: string, request: Request): Response {
   let realTarget: string
   try { realTarget = realpathSync(target) } catch { return secureResponse('Not found', 404) }
   if (realTarget !== root && !realTarget.startsWith(root + sep)) return secureResponse('Forbidden', 403)
-  const headers: Record<string, string> = { ...SECURITY_HEADERS, 'cache-control': target.endsWith('index.html') ? 'no-cache' : 'public, max-age=3600', 'content-type': contentType(target) }
+  // No asset is content-hashed (fixed names like main.js), so any max-age here strands
+  // browsers on a stale bundle until the entry expires — and caches sw.js itself,
+  // hiding build-hash updates from the service worker. Always revalidate.
+  const headers: Record<string, string> = { ...SECURITY_HEADERS, 'cache-control': 'no-cache', 'content-type': contentType(target) }
   return new Response(Bun.file(realTarget), { headers })
 }
 function isSpaNavigation(request: Request, relativePath: string): boolean {

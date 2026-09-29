@@ -1,9 +1,10 @@
 import { applySnapshotPatch, encodeFrames, FrameAssembler, parseServerMessage, PROTOCOL_VERSION, type WorkbenchCommand, type WorkbenchSnapshot } from '../protocol/index.ts'
 import type { FlowRuntimeSnapshot } from '../flows/types.ts'
 import type { RemoteTerminalFrame, RemoteTerminalSnapshot } from '../protocol/terminal.ts'
+import { normalizeHostIdentity, type HostIdentity } from '../protocol/host-identity.ts'
 
 export type WorkspaceClientStatus = 'connecting' | 'open' | 'closed'
-export interface WorkspaceClientView { status: WorkspaceClientStatus; workspacePath: string; state: WorkbenchSnapshot | undefined; flows: FlowRuntimeSnapshot | undefined; terminal?: RemoteTerminalSnapshot | undefined; lastError?: string | undefined }
+export interface WorkspaceClientView { status: WorkspaceClientStatus; workspacePath: string; state: WorkbenchSnapshot | undefined; flows: FlowRuntimeSnapshot | undefined; terminal?: RemoteTerminalSnapshot | undefined; lastError?: string | undefined; host?: HostIdentity | undefined; url?: string | undefined }
 type SocketFactory = (url: string, protocols?: string[]) => WebSocket
 interface PendingCommand { wire: string; resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout>; sent: boolean }
 const MIN_BACKOFF_MS = 500
@@ -17,6 +18,8 @@ export class WorkspaceClient {
   readonly #clientId: string
   #socket: WebSocket | undefined
   #url = ''
+  #candidates: string[] = []
+  #failures = 0
   #token = ''
   #wantOpen = false
   #timer: ReturnType<typeof setTimeout> | undefined
@@ -30,11 +33,12 @@ export class WorkspaceClient {
   #view: WorkspaceClientView = { status: 'closed', workspacePath: '', state: undefined, flows: undefined }
 
   constructor(socketFactory: SocketFactory = (url, protocols) => new WebSocket(url, protocols), clientId = createClientId()) { this.#socketFactory = socketFactory; this.#clientId = clientId }
-  connect(url: string, token: string): void {
+  connect(url: string, token: string, alternates: readonly string[] = []): void {
     const normalized = normalizeHostUrl(url)
     if (!token || token.length < 32) throw new Error('A valid pairing token is required')
     this.disconnect()
     this.#url = normalized; this.#token = token; this.#wantOpen = true; this.#backoff = MIN_BACKOFF_MS
+    this.#candidates = mergeCandidates(normalized, alternates)
     this.#open()
   }
   disconnect(): void {
@@ -45,10 +49,10 @@ export class WorkspaceClient {
     this.#frames.reset()
     this.#terminalFrames.clear()
     for (const [id, pending] of this.#pending) { clearTimeout(pending.timer); pending.reject(new Error('Disconnected')); this.#pending.delete(id) }
-    this.#set({ status: 'closed', workspacePath: '', state: undefined, flows: undefined, terminal: undefined, lastError: undefined })
+    this.#set({ status: 'closed', workspacePath: '', state: undefined, flows: undefined, terminal: undefined, lastError: undefined, host: undefined, url: undefined })
   }
   dispose(): void { this.disconnect(); this.#url = ''; this.#token = ''; this.#listeners.clear(); this.#terminalListeners.clear() }
-  reconnect(): void { if (!this.#url) return; const url = this.#url, token = this.#token; this.disconnect(); this.connect(url, token) }
+  reconnect(): void { if (!this.#url) return; const url = this.#url, token = this.#token, candidates = this.#candidates; this.disconnect(); this.connect(url, token, candidates) }
   subscribe(listener: () => void): () => void { this.#listeners.add(listener); return () => { this.#listeners.delete(listener) } }
   getSnapshot(): WorkspaceClientView { return this.#view }
   onTerminalFrame(listener: (frame: RemoteTerminalFrame) => void): () => void { this.#terminalListeners.add(listener); return () => { this.#terminalListeners.delete(listener) } }
@@ -89,8 +93,10 @@ export class WorkspaceClient {
       if (message.kind === 'welcome') {
         if (message.protocol !== PROTOCOL_VERSION) { this.reportError(new Error('Host protocol is incompatible')); socket.close(); return }
         this.#backoff = MIN_BACKOFF_MS
+        this.#failures = 0
+        this.#candidates = mergeCandidates(this.#url, message.hostUrls ?? [])
         this.#pruneTerminalFrames(message.terminal)
-        this.#set({ status: 'open', workspacePath: message.workspacePath, state: message.snapshot, flows: message.flows, terminal: message.terminal, lastError: undefined })
+        this.#set({ status: 'open', workspacePath: message.workspacePath, state: message.snapshot, flows: message.flows, terminal: message.terminal, lastError: undefined, host: normalizeHostIdentity(message.host), url: this.#url })
         for (const pending of this.#pending.values()) pending.sent = false
         this.#flush(); return
       }
@@ -117,11 +123,22 @@ export class WorkspaceClient {
       frames.reset()
       this.#terminalFrames.clear()
       for (const pending of this.#pending.values()) pending.sent = false
+      this.#failures += 1
+      this.#rotateIfStuck()
       this.#set({ status: this.#wantOpen ? 'connecting' : 'closed', terminal: undefined })
       this.#schedule()
     })
     socket.addEventListener('error', () => { if (this.#socket === socket) this.#set({ lastError: 'Socket error' }) })
   }
+  get candidates(): string[] { return [...this.#candidates] }
+  // After repeated failures on one advertised URL, try the next candidate before backing off again.
+  #rotateIfStuck(): void {
+    if (this.#failures < 2 || this.#candidates.length < 2) return
+    const index = this.#candidates.indexOf(this.#url)
+    if (index !== -1) this.#url = this.#candidates[(index + 1) % this.#candidates.length] ?? this.#url
+    this.#backoff = MIN_BACKOFF_MS
+  }
+
   #flush(): void {
     const socket = this.#socket
     if (!socket || socket.readyState !== WebSocket.OPEN || this.#view.status !== 'open') return
@@ -163,3 +180,9 @@ export function readConnectionSettings(search = '', storage?: Pick<Storage, 'get
   return { host: fragment.get('host') ?? query.get('host') ?? storage?.getItem('heddlework.host') ?? origin, token: fragment.get('token') ?? storage?.getItem('heddlework.token') ?? '' }
 }
 function createClientId(): string { return `web-${crypto.randomUUID()}` }
+export function mergeCandidates(current: string, alternates: readonly string[]): string[] {
+  const normalize = (value: string): string => { try { return normalizeHostUrl(value) } catch { return '' } }
+  const merged: string[] = []
+  for (const candidate of [current, ...alternates]) { const url = normalize(candidate); if (url && !merged.includes(url)) merged.push(url) }
+  return merged
+}

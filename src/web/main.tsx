@@ -1,3 +1,4 @@
+import './uuid-shim.ts'
 import '../dom/process-shim.ts'
 
 // crypto.randomUUID (and crypto.subtle) exist only in secure contexts
