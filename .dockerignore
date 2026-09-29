@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.git/
+.github/
+.freebuff/
+docs/
+media/
+packaging/
+tests/
+scripts/linux-compositor-smoke.sh
+*.log
+*.md
+!README.md
+Dockerfile*
+docker-compose.yml
